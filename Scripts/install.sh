@@ -29,7 +29,7 @@ tem_certeza() {
 }
 
 valida_resposta_simples() {
-    local resposta="${1,,}" # Converte para minúscula
+    local resposta=$(echo "${1,,}" | tr -d '[:space:]') # Converte para minúscula e remove espaços
 
     # Validação Positiva Enter 
     if [[ -z "$resposta" ]]; then
@@ -54,29 +54,34 @@ valida_resposta_simples() {
 
 detect_package_manager() {
     if command -v apt &> /dev/null; then
-        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mapt\033[0m"  # Debian/Ubuntu
+        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mapt\033[0m"        # Debian/Ubuntu
         CMD_PACK_MANAGER_INSTALL="sudo apt install -y"
         CMD_PACK_MANAGER_NAME="apt"
+        CONFIG_DIR="/etc/apt"
         return 0
     elif command -v pacman &> /dev/null; then
-        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mpacman\033[0m"  # Arch
+        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mpacman\033[0m"     # Arch
         CMD_PACK_MANAGER_INSTALL="sudo pacman -S --noconfirm"
         CMD_PACK_MANAGER_NAME="pacman"
+        CONFIG_DIR="/etc/pacman.d"
         return 0
     elif command -v dnf &> /dev/null; then
-        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mdnf\033[0m"  # Fedora
+        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mdnf\033[0m"        # Fedora
         CMD_PACK_MANAGER_INSTALL="sudo dnf install -y"
         CMD_PACK_MANAGER_NAME="dnf"
+        CONFIG_DIR="/etc/yum"
         return 0
     elif command -v yum &> /dev/null; then
-        echo -e "Encontramos seu Gerenciador! Você usa o \033[32myum\033[0m"  # RHEL/CentOS
+        echo -e "Encontramos seu Gerenciador! Você usa o \033[32myum\033[0m"        # RHEL/CentOS
         CMD_PACK_MANAGER_INSTALL="sudo yum install -y"
         CMD_PACK_MANAGER_NAME="yum"
+        CONFIG_DIR="/etc/yum"
         return 0
     elif command -v zypper &> /dev/null; then
-        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mzypper\033[0m"  # openSUSE
+        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mzypper\033[0m"     # openSUSE
         CMD_PACK_MANAGER_INSTALL="sudo zypper install -y"
         CMD_PACK_MANAGER_NAME="zypper"
+        CONFIG_DIR="/etc/zypp"
         return 0
     else
         echo -e "\033[31mQue pena. Não conseguimos encontrar seu instalador. :(\033[0m"
@@ -92,8 +97,11 @@ detect_package_manager() {
                     read -rp "Qual é o parâmetro de instalação? (ex: install, -S): " resposta_discritiva
                     CMD_PACK_MANAGER_INSTALL="sudo $CMD_PACK_MANAGER_NAME $resposta_discritiva"
                     
+                    read -rp "Qual é o diretório de configuração? (ex: /etc/apt): " CONFIG_DIR
+                    
                     echo -e "\n\033[33mValide as informações:\033[0m"
                     echo -e "Comando: \033[36m$CMD_PACK_MANAGER_INSTALL pacote\033[0m"
+                    echo -e "Diretório de configuração: \033[36m$CONFIG_DIR\033[0m"
                     
                     if tem_certeza; then
                         return 0
@@ -108,10 +116,322 @@ detect_package_manager() {
     fi
 }
 
+#------------#------------# Mirrors #------------#------------#
+
+editar_config_mirrors() {
+    local config_file="tools.conf"
+    local mirrors=(
+        "# Git mirrors"
+        "git_mirror=https://mirrors.edge.kernel.org/pub/software/scm/git/"
+        "git_alt_mirror=https://github.com/git/git"
+        
+        "# GitHub Leaks mirrors"
+        "github_leaks_mirror=https://github.com/gitleaks/gitleaks"
+        "github_leaks_releases=https://github.com/gitleaks/gitleaks/releases"
+        
+        "# Sherlock mirrors"
+        "sherlock_mirror=https://github.com/sherlock-project/sherlock"
+        "sherlock_pypi=https://pypi.org/project/sherlock/"
+        
+        "# Nmap mirrors"
+        "nmap_mirror=https://nmap.org/dist/"
+        "nmap_alt_mirror=https://github.com/nmap/nmap"
+        
+        "# FFuf mirrors (Web Fuzzer)"
+        "ffuf_mirror=https://github.com/ffuf/ffuf"
+        "ffuf_releases=https://github.com/ffuf/ffuf/releases"
+        "ffuf_pkg=github.com/ffuf/ffuf/v2@latest"
+        
+        "# Attack Surface Mapper"
+        "attack_surface_mapper=https://github.com/superhedgy/AttackSurfaceMapper"
+        "asm_releases=https://github.com/superhedgy/AttackSurfaceMapper/releases"
+        "asm_docker=ghcr.io/superhedgy/attacksurfacemapper:latest"
+        
+        "# AutoRecon"
+        "autorecon_main=https://github.com/Tib3rius/AutoRecon/blob/main/autorecon/main.py"
+        "autorecon_repo=https://github.com/Tib3rius/AutoRecon"
+        "autorecon_pypi=https://pypi.org/project/autorecon/"
+
+        "# XRay (Security Tool)"
+        "xray_repo=https://github.com/evilsocket/xray"
+        "xray_releases=https://github.com/evilsocket/xray/releases"
+        "xray_docs=https://xray.readthedocs.io/"
+
+        "# Fierce DNS Scanner"
+        "fierce_repo=https://github.com/mschwager/fierce"
+        "fierce_pypi=https://pypi.org/project/fierce/"
+        "fierce_docker=ghcr.io/mschwager/fierce:latest"
+
+        "# FinalRecon OSINT Tool"
+        "finalrecon_repo=https://github.com/thewhiteh4t/FinalRecon"
+        "finalrecon_releases=https://github.com/thewhiteh4t/FinalRecon/releases"
+
+        "# Firewalk Network Scanner"
+        "firewalk_original=http://packetfactory.openwall.net/projects/firewalk/"
+        "firewalk_github=https://github.com/0x90/firewalk"
+
+        "# Clusterd Application Server Exploitation Toolkit"
+        "clusterd_repo=https://github.com/hatRiot/clusterd"
+        "clusterd_docs=https://clusterd.readthedocs.io/"
+    )
+
+    # Verifica permissões de escrita no diretório atual
+    if [[ ! -w "$(pwd)" ]]; then
+        echo -e "\033[31mErro: Sem permissão para escrever em $(pwd).\033[0m"
+        return 1
+    fi
+
+    echo -e "\033[34mConfigurando mirrors no arquivo $config_file...\033[0m"
+    
+    # Create config file if it doesn't exist
+    if [[ ! -f "$config_file" ]]; then
+        touch "$config_file" || {
+            echo -e "\033[31mErro: Não foi possível criar o arquivo $config_file.\033[0m"
+            return 1
+        }
+        echo -e "\033[33mArquivo $config_file criado.\033[0m"
+        echo "# Security Tools Mirror Configuration" >> "$config_file"
+        echo "# Generated on $(date)" >> "$config_file"
+        echo "# DO NOT EDIT MANUALLY - Use the mirror configuration tool" >> "$config_file"
+        echo "" >> "$config_file"
+    fi
+
+    # Add mirrors with validation
+    for mirror in "${mirrors[@]}"; do
+        if [[ "$mirror" == \#* ]]; then
+            # Add section headers with spacing
+            if ! grep -Fx "$mirror" "$config_file" > /dev/null; then
+                echo "" >> "$config_file"
+                echo "$mirror" >> "$config_file"
+            fi
+        else
+            # Check if mirror already exists
+            if ! grep -Fx "^${mirror%%=*}" "$config_file" > /dev/null; then
+                echo "$mirror" >> "$config_file"
+                echo -e "  \033[32m✓\033[0m Adicionado: ${mirror%%=*}"
+            else
+                echo -e "  \033[33mⓘ\033[0m Já existe: ${mirror%%=*}"
+            fi
+        fi
+    done
+
+    echo -e "\n\033[32mMirror configuration complete!\033[0m"
+    echo -e "Total tools configured: \033[36m$(grep -c '^[^#]' "$config_file")\033[0m"
+    echo -e "Config file location: \033[35m$(pwd)/$config_file\033[0m"
+}
+
+configure_multi_package_mirrors() {
+    local config_file="$CONFIG_DIR/mirrors_multi.conf"
+    local mirrors=(
+        "# Git mirrors"
+        "git_mirror=https://mirrors.edge.kernel.org/pub/software/scm/git/"
+        "git_alt_mirror=https://github.com/git/git"
+        
+        "# GitHub Leaks mirrors"
+        "github_leaks_mirror=https://github.com/gitleaks/gitleaks"
+        "github_leaks_releases=https://github.com/gitleaks/gitleaks/releases"
+        
+        "# Sherlock mirrors"
+        "sherlock_mirror=https://github.com/sherlock-project/sherlock"
+        "sherlock_pypi=https://pypi.org/project/sherlock/"
+        
+        "# Nmap mirrors"
+        "nmap_mirror=https://nmap.org/dist/"
+        "nmap_alt_mirror=https://github.com/nmap/nmap"
+        
+        "# FFuf mirrors (Web Fuzzer)"
+        "ffuf_mirror=https://github.com/ffuf/ffuf"
+        "ffuf_releases=https://github.com/ffuf/ffuf/releases"
+        "ffuf_pkg=github.com/ffuf/ffuf/v2@latest"
+        
+        "# Attack Surface Mapper"
+        "attack_surface_mapper=https://github.com/superhedgy/AttackSurfaceMapper"
+        "asm_releases=https://github.com/superhedgy/AttackSurfaceMapper/releases"
+        "asm_docker=ghcr.io/superhedgy/attacksurfacemapper:latest"
+        
+        "# AutoRecon"
+        "autorecon_main=https://github.com/Tib3rius/AutoRecon/blob/main/autorecon/main.py"
+        "autorecon_repo=https://github.com/Tib3rius/AutoRecon"
+        "autorecon_pypi=https://pypi.org/project/autorecon/"
+
+        "# XRay (Security Tool)"
+        "xray_repo=https://github.com/evilsocket/xray"
+        "xray_releases=https://github.com/evilsocket/xray/releases"
+        "xray_docs=https://xray.readthedocs.io/"
+
+        "# Fierce DNS Scanner"
+        "fierce_repo=https://github.com/mschwager/fierce"
+        "fierce_pypi=https://pypi.org/project/fierce/"
+        "fierce_docker=ghcr.io/mschwager/fierce:latest"
+
+        "# FinalRecon OSINT Tool"
+        "finalrecon_repo=https://github.com/thewhiteh4t/FinalRecon"
+        "finalrecon_releases=https://github.com/thewhiteh4t/FinalRecon/releases"
+
+        "# Firewalk Network Scanner"
+        "firewalk_original=http://packetfactory.openwall.net/projects/firewalk/"
+        "firewalk_github=https://github.com/0x90/firewalk"
+
+        "# Clusterd Application Server Exploitation Toolkit"
+        "clusterd_repo=https://github.com/hatRiot/clusterd"
+        "clusterd_docs=https://clusterd.readthedocs.io/"
+    )
+
+    # Verifica se o diretório de configuração existe
+    if [[ ! -d "$CONFIG_DIR" ]]; then
+        echo -e "\033[31mErro: Diretório $CONFIG_DIR não encontrado.\033[0m"
+        return 1
+    fi
+
+    # Verifica permissões de escrita
+    if [[ ! -w "$CONFIG_DIR" ]]; then
+        echo -e "\033[31mErro: Sem permissão para escrever em $CONFIG_DIR. Execute com sudo.\033[0m"
+        return 1
+    fi
+
+    echo -e "\033[34mConfigurando mirrors no arquivo $config_file...\033[0m"
+    
+    # Cria o arquivo de configuração se não existir
+    if [[ ! -f "$config_file" ]]; then
+        touch "$config_file" || {
+            echo -e "\033[31mErro: Não foi possível criar o arquivo $config_file.\033[0m"
+            return 1
+        }
+        echo -e "\033[33mArquivo $config_file criado.\033[0m"
+        echo "# Mirrors Configuration for Multiple Package Managers" >> "$config_file"
+        echo "# Compatible with apt, yum/dnf, pacman, and others" >> "$config_file"
+        echo "# Generated on $(date)" >> "$config_file"
+        echo "# Format: key=value (parseable by shell and package managers)" >> "$config_file"
+        echo "" >> "$config_file"
+    else
+        echo -e "\033[33mArquivo $config_file já existe, adicionando novos mirrors sem sobrescrever.\033[0m"
+    fi
+
+    # Adiciona os mirrors com validação
+    for mirror in "${mirrors[@]}"; do
+        if [[ "$mirror" == \#* ]]; then
+            # Adiciona cabeçalhos de seção com espaçamento
+            if ! grep -Fx "$mirror" "$config_file" > /dev/null; then
+                echo "" >> "$config_file"
+                echo "$mirror" >> "$config_file"
+            fi
+        else
+            # Verifica se o mirror já existe no arquivo
+            if ! grep -Fx "^${mirror%%=*}" "$config_file" > /dev/null; then
+                echo "$mirror" >> "$config_file"
+                echo -e "  \033[32m✓\033[0m Adicionado: ${mirror%%=*}"
+            else
+                echo -e "  \033[33mⓘ\033[0m Já existe: ${mirror%%=*}"
+            fi
+        fi
+    done
+
+    echo -e "\n\033[32mConfiguração de mirrors concluída!\033[0m"
+    echo -e "Total de ferramentas configuradas: \033[36m$(grep -c '^[^#]' "$config_file")\033[0m"
+    echo -e "Localização do arquivo de configuração: \033[35m$config_file\033[0m"
+    echo -e "\033[34mEste arquivo é compatível com apt, yum/dnf, pacman e outros gerenciadores de pacotes.\033[0m"
+}
+
+#------------#------------# FUNÇÃO PARA CRIAR O DIRETÓRIO WORDLISTS #------------#------------#
+
+setup_wordlists() {
+    local wordlists_dir="$HOME/wordlists"
+    local timestamp=$(date +%Y%m%d_%H%M%S)
+    local log_file="$wordlists_dir/wordlist_setup_${timestamp}.log"
+    
+    # Verifica se git está instalado
+    if ! command -v git &> /dev/null; then
+        echo -e "\033[31mErro: 'git' não está instalado.\033[0m"
+        echo -e "\033[34mTentando instalar o 'git' com '$CMD_PACK_MANAGER_INSTALL git'...\033[0m"
+        
+        # Tenta instalar o git
+        if $CMD_PACK_MANAGER_INSTALL git &>> "$log_file"; then
+            echo -e "\033[32m[√] 'git' instalado com sucesso!\033[0m"
+        else
+            echo -e "\033[31mErro: Falha ao instalar o 'git'. Instale manualmente com '$CMD_PACK_MANAGER_INSTALL git'.\033[0m"
+            return 1
+        fi
+    fi
+
+    # Verifica permissões de escrita
+    if [[ ! -w "$HOME" ]]; then
+        echo -e "\033[31mErro: Sem permissão para escrever em $HOME.\033[0m"
+        return 1
+    fi
+
+    # Create wordlists directory structure
+    declare -A wordlist_repos=(
+        ["SecLists"]="https://github.com/danielmiessler/SecLists"
+        ["dadoware"]="https://github.com/thoughtworks/dadoware"
+        ["awesome-wordlists"]="https://github.com/gmelodie/awesome-wordlists"
+    )
+    
+    echo -e "\033[34m[+] Configurando wordlists no diretório home...\033[0m"
+    
+    # Create base directory
+    if [[ ! -d "$wordlists_dir" ]]; then
+        mkdir -p "$wordlists_dir" || {
+            echo -e "\033[31m[-] Falha ao criar o diretório de wordlists em $wordlists_dir\033[0m" | tee -a "$log_file"
+            return 1
+        }
+        echo -e "\033[32m[+] Diretório criado: $wordlists_dir\033[0m" | tee -a "$log_file"
+    else
+        echo -e "\033[33m[!] Diretório de wordlists já existe em $wordlists_dir\033[0m" | tee -a "$log_file"
+    fi
+    
+    # Download/update each repository
+    for repo in "${!wordlist_repos[@]}"; do
+        local repo_dir="${wordlists_dir}/${repo}"
+        local repo_url="${wordlist_repos[$repo]}"
+        
+        echo -e "\n\033[36mProcessando ${repo}...\033[0m" | tee -a "$log_file"
+        
+        if [[ -d "$repo_dir" ]]; then
+            echo "Atualizando repositório existente: ${repo}" | tee -a "$log_file"
+            cd "$repo_dir" || continue
+            git pull --quiet 2>> "$log_file" && {
+                echo -e "\033[32m[√] ${repo} atualizado com sucesso\033[0m" | tee -a "$log_file"
+                cd - > /dev/null || return 1
+            } || {
+                echo -e "\033[31m[!] Falha ao atualizar ${repo}\033[0m" | tee -a "$log_file"
+                cd - > /dev/null || return 1
+            }
+        else
+            echo "Clonando novo repositório: ${repo}" | tee -a "$log_file"
+            git clone --depth 1 "$repo_url" "$repo_dir" --quiet 2>> "$log_file" && {
+                echo -e "\033[32m[√] ${repo} clonado com sucesso\033[0m" | tee -a "$log_file"
+            } || {
+                echo -e "\033[31m[!] Falha ao clonar ${repo}\033[0m" | tee -a "$log_file"
+            }
+        fi
+        
+        # Create symbolic links to common wordlists
+        if [[ "$repo" == "SecLists" && -f "${repo_dir}/Discovery/Web-Content/raft-large-directories.txt" ]]; then
+            ln -sf "${repo_dir}/Discovery/Web-Content/raft-large-directories.txt" "${wordlists_dir}/web_directories.txt" 2>/dev/null
+            ln -sf "${repo_dir}/Passwords/Common-Credentials/top-20-common-SSH-passwords.txt" "${wordlists_dir}/ssh_passwords.txt" 2>/dev/null
+        fi
+    done
+    
+    # Create useful subdirectories
+    mkdir -p "${wordlists_dir}/custom" "${wordlists_dir}/merged" 2>/dev/null
+    
+    echo -e "\n\033[32m[+] Configuração de wordlists concluída!\033[0m" | tee -a "$log_file"
+    echo -e "Diretório de wordlists: \033[35m${wordlists_dir}\033[0m"
+    echo -e "Arquivo de log: \033[35m${log_file}\033[0m"
+    echo -e "\n\033[33mRecomendação: Execute esta função periodicamente para atualizar as wordlists\033[0m"
+    
+    # Add to PATH if not already present
+    if [[ ":$PATH:" != *":$wordlists_dir:"* ]]; then
+        echo -e "\n\033[36mConsidere adicionar ao seu PATH:\033[0m"
+        echo "echo 'export PATH=\"\$PATH:$wordlists_dir\"' >> ~/.bashrc"
+    fi
+}
+
 #------------#------------# DECLARAÇÕES DE VARIAVEIS GLOBAIS #------------#------------#
 
 CMD_PACK_MANAGER_INSTALL=""
 CMD_PACK_MANAGER_NAME=""
+CONFIG_DIR=""
 resposta_discritiva=""
 resposta=""
 pergunta=""
@@ -122,17 +442,35 @@ main() {
     echo -e "\n\033[34mBem-vindo à ferramenta de instalação\033[0m\n"
     sleep 1
 
-    # Simula um processo demorado
+    # Simula um processo demorado para detecção do gerenciador de pacotes
     (sleep 3) &
     loading_animation $! "Aguarde enquanto encontramos seu gerenciador de pacotes"
     
     if detect_package_manager; then
-        echo -e "\n\033[32mConfiguração concluída com sucesso!\033[0m"
+        echo -e "\n\033[32mConfiguração do gerenciador concluída com sucesso!\033[0m"
         echo -e "Gerenciador: \033[36m$CMD_PACK_MANAGER_NAME\033[0m"
         echo -e "Comando de instalação: \033[36m$CMD_PACK_MANAGER_INSTALL\033[0m"
+        echo -e "Diretório de configuração: \033[36m$CONFIG_DIR\033[0m"
+        
+        # Simula um processo demorado para configuração de mirrors
+        (sleep 3) &
+        loading_animation $! "Aguarde enquanto configuramos os mirrors"
+        
+        configure_multi_package_mirrors
+        
+        # Simula um processo demorado para configuração de wordlists
+        (sleep 3) &
+        loading_animation $! "Aguarde enquanto configuramos as wordlists"
+        
+        setup_wordlists
     else
         echo -e "\n\033[33mNenhum gerenciador de pacotes foi configurado.\033[0m"
     fi
+    
+    # Configura o arquivo tools.conf no diretório atual
+    (sleep 3) &
+    loading_animation $! "Aguarde enquanto configuramos tools.conf"
+    editar_config_mirrors
 }
 
 # Executa a função principal
