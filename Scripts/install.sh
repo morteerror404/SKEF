@@ -1,730 +1,465 @@
 #!/bin/bash
 
-#------------#------------# VARIÁVEIS GLOBAIS #------------#------------#
-ASK=""
-TARGET=""
-TARGET_IPv4=""
-TARGET_IPv6=""
-TYPE_TARGET=""
-CHECKLIST=()
-JSON_FILE="scan_results_$(date +%s).json"
-WORDLISTS_DIR="$HOME/wordlists"
-NMAP_SILENCE=""
-START_TIME=$(date +%s)
-PROGRAM_START_TIME=$(date '+%Y-%m-%dT%H:%M:%S%z')
-
-# Definir cores ANSI
-if [ "$(tput colors)" -ge 8 ]; then
-    BLUE="\033[1;34m"
-    CYAN="\033[1;36m"
-    GREEN="\033[1;32m"
-    YELLOW="\033[1;33m"
-    PURPLE="\033[1;35m"
-    WHITE="\033[1;37m"
-    RED="\033[1;31m"
-    NC="\033[0m"
-else
-    BLUE=""
-    CYAN=""
-    GREEN=""
-    YELLOW=""
-    PURPLE=""
-    WHITE=""
-    RED=""
-    NC=""
-fi
-
-# Arrays associativos para rastrear estados das portas e tempos
-declare -A PORT_STATUS_IPV4
-declare -A PORT_STATUS_IPV6
-declare -A PORT_TESTS_IPV4
-declare -A PORT_TESTS_IPV6
-declare -A TEST_TIMES
-
-#------------#------------# VARIÁVEIS COMANDOS #------------#------------#
-NMAP_COMMANDS_IPV4=(
-    "nmap {TARGET_IP} --top-ports 100 -T4 -v {NMAP_SILENCE}"
-    "nmap {TARGET_IP} -vv -O {NMAP_SILENCE}"
-    "nmap {TARGET_IP} -sV -O -vv {NMAP_SILENCE}"
-)
-NMAP_COMMANDS_IPV6=(
-    "nmap -6 {TARGET_IP} --top-ports 100 -T4 -v {NMAP_SILENCE}"
-    "nmap -6 {TARGET_IP} -vv -O {NMAP_SILENCE}"
-    "nmap -6 {TARGET_IP} -sV -O -vv {NMAP_SILENCE}"
-)
-FFUF_COMMANDS=(
-    "ffuf -u {PROTOCOL}://{TARGET}/ -H \"Host: FUZZ.{TARGET}\" -w {WORDLIST_SUBDOMAINS} -mc 200,301,302 -o ffuf_subdomains_output.csv -of csv"
-    "ffuf -u {PROTOCOL}://{TARGET}/ -H \"Host: FUZZ.{TARGET}\" -w {WORDLIST_SUBDOMAINS} -mc 200,301,302 -fc 404 -o ffuf_subdomains_output.csv -of csv"
-    "ffuf -u {PROTOCOL}://{TARGET}/ -H \"Host: FUZZ.{TARGET}\" -w {WORDLIST_SUBDOMAINS} -mc 200,301,302 -t 50 -recursion -recursion-depth 1 -o ffuf_subdomains_output.csv -of csv"
-)
-FFUF_WEB_COMMANDS=(
-    "ffuf -u {PROTOCOL}://{TARGET}/FUZZ -w {WORDLIST_WEB} -mc 200,301,302 -o ffuf_pages_output.csv -of csv"
-    "ffuf -u {PROTOCOL}://{TARGET}/FUZZ -w {WORDLIST_WEB} -mc 200,301,302 -e .php,.txt,.html -o ffuf_files_output.csv -of csv"
-    "ffuf -u {PROTOCOL}://{TARGET}/FUZZ -w {WORDLIST_WEB} -mc 200,301,302 -recursion -recursion-depth 2 -o ffuf_pages_output.csv -of csv"
-)
-ASM_COMMANDS=(
-    "python3 -m attacksurfacemapper -t {TARGET} -o asm_output.txt -sth"
-    "python3 -m attacksurfacemapper -t {TARGET} -o asm_output.txt -exp"
-    "python3 -m attacksurfacemapper -t {TARGET} -o asm_output.txt -sth -api"
-)
-AR_COMMANDS=(
-    "autorecon {TARGET_IP} --dir autorecon_output --only-scans"
-    "autorecon {TARGET_IP} --dir autorecon_output"
-    "autorecon {TARGET_IP} --dir autorecon_output --web"
-)
-GL_COMMAND="gitleaks detect --source . --no-git -c {TARGET} -o gitleaks_output.json"
-SH_COMMAND="python3 -m sherlock {TARGET} --output sherlock_output.txt"
-XRAY_COMMAND="xray ws --url {PROTOCOL}://{TARGET} --json-output xray_output.json"
-FIERCE_COMMAND="fierce --domain {TARGET} --subdomain-file {WORDLIST_SUBDOMAINS} --output fierce_output.txt"
-FR_COMMAND="python3 -m finalrecon --full {PROTOCOL}://{TARGET} --out finalrecon_output.txt"
-FW_COMMAND="firewalk -S1-1024 -i eth0 -n {TARGET_IP} -o firewalk_output.txt"
-CL_COMMAND="python3 -m clusterd -t {TARGET} -o clusterd_output.txt"
-
 #------------#------------# FUNÇÕES AUXILIARES #------------#------------#
-validar_root() {
-    if [ "$(id -u)" -ne 0 ]; then
-        echo -e "${RED}[✗] Este script requer privilégios de root. Execute com sudo.${NC}"
-        if ! command -v jq &>/dev/null; then
-            echo -e "${RED}[✗] O jq não está instalado. Instale-o com 'sudo apt-get install jq' ou equivalente.${NC}"
-        fi
-        exit 1
-    fi
-    if ! command -v jq &>/dev/null; then
-        echo -e "${RED}[✗] O jq não está instalado. Instale-o com 'sudo apt-get install jq' ou equivalente.${NC}"
-        exit 1
-    fi
-    echo -e "${GREEN}[✔] Executando como root e jq instalado.${NC}"
+
+loading_animation() {
+    local pid=$1
+    local text="${2:-Processando...}"
+    local delay=0.1
+    local spin='-\|/'
+    local i=0
+    
+    echo -n "$text...  "
+    
+    while kill -0 "$pid" 2>/dev/null; do
+        i=$(( (i+1) %4 ))
+        printf "\b${spin:$i:1}"
+        sleep "$delay"
+    done
+    
+    printf "\b \n"
 }
 
-print_status() {
-    local color="$1" message="$2"
-    case "$color" in
-        "info") echo -e "${BLUE}[+] $message${NC}" ;;
-        "action") echo -e "${YELLOW}[▶] $message${NC}" ;;
-        "success") echo -e "${GREEN}[✔] $message${NC}" ;;
-        "error") echo -e "${RED}[✗] $message${NC}" ;;
-    esac
+tem_certeza() {
+    local resposta
+    read -rp "Deseja continuar? [S/n] " resposta
+    valida_resposta_simples "$resposta"
+    return $?
 }
 
-print_clock_frame() {
-    local frame=$1 task=$2 hora=$(date +"%H:%M:%S")
-    clear
-    
-    # Display target information at the top
-    echo -e "${BLUE}=== Target: ${CYAN}$TARGET ${BLUE}(${TYPE_TARGET}) ===${NC}"
-    [ -n "$TARGET_IPv4" ] && echo -e "${GREEN}IPv4: $TARGET_IPv4${NC}"
-    [ -n "$TARGET_IPv6" ] && echo -e "${GREEN}IPv6: $TARGET_IPv6${NC}"
-    
-    # Animated clock
-    echo -e "\n   ${PURPLE}______${NC}"
-    echo -e " ${PURPLE}/${YELLOW}________${PURPLE}\\${NC}"
-    echo -e " ${PURPLE}|${CYAN}$hora${PURPLE}|${NC}"
-    echo -e " ${PURPLE}|${YELLOW}________${PURPLE}|${NC}"
-    if [ "$frame" -eq 1 ]; then
-        echo -e " ${PURPLE}|${YELLOW}........${PURPLE}|${NC}"
-        echo -e " ${PURPLE}|${YELLOW}........${PURPLE}|${NC}"
+valida_resposta_simples() {
+    local resposta=$(echo "${1,,}" | tr -d '[:space:]')
+    if [[ -z "$resposta" ]]; then
+        return 0
+    elif [[ "$resposta" == "y" || "$resposta" == "s" ]]; then
+        return 0
+    elif [[ "$resposta" == "n" ]]; then
+        return 1
     else
-        echo -e " ${PURPLE}|${YELLOW}        ${PURPLE}|${NC}"
-        echo -e " ${PURPLE}|${YELLOW}        ${PURPLE}|${NC}"
+        echo -e "\033[31mResposta inválida! Por favor, use uma opção válida. [S/n]\033[0m"
+        return 2
     fi
-    echo -e " ${PURPLE}\\ ${YELLOW}______${PURPLE} /${NC}"
-    
-    # Current task and checklist
-    echo -e "\n${WHITE}Executando: ${CYAN}$task${NC}"
-    echo -e "\n${GREEN}Checklist:${NC}"
-    for item in "${CHECKLIST[@]}"; do
-        item_sanitized=$(echo "$item" | sed 's/[^[:print:]]//g')
-        if [[ "$item_sanitized" == *"✓"* ]]; then
-            echo -e " ${GREEN}✔ $item_sanitized${NC}"
-        elif [[ "$item_sanitized" == *"✗"* ]]; then
-            echo -e " ${RED}✖ $item_sanitized${NC}"
-        elif [[ "$item_sanitized" == *"⚠"* ]]; then
-            echo -e " ${YELLOW}⚠ $item_sanitized${NC}"
-        else
-            echo -e " - $item_sanitized"
-        fi
-    done
 }
 
-loading_clock() {
-    local task="$1" duration=${2:-3}
-    local end_time=$((SECONDS + duration))
-    local pid
-    while [ $SECONDS -lt $end_time ]; do
-        print_clock_frame 1 "$task" &
-        pid=$!
-        sleep 0.3
-        kill -0 $pid 2>/dev/null && kill $pid
-        wait $pid 2>/dev/null
-        print_clock_frame 2 "$task" &
-        pid=$!
-        sleep 0.3
-        kill -0 $pid 2>/dev/null && kill $pid
-        wait $pid 2>/dev/null
-    done
-}
+#------------#------------# FUNÇÕES DE VERIFICAÇÃO #------------#------------#
 
-verificar_tipo_alvo() {
-    local entrada=$(echo "$1" | sed -E 's|^https?://||; s|/.*$||; s|:[0-9]+$||')
-    if [[ $entrada =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-        echo "IP"
-    elif [[ $entrada =~ ^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$ ]]; then
-        echo "IP"
-    elif [[ $entrada =~ ^([a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}$ ]]; then
-        echo "DOMAIN"
+detect_package_manager() {
+    if command -v apt &> /dev/null; then
+        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mapt\033[0m"
+        CMD_PACK_MANAGER_INSTALL="sudo apt install -y"
+        CMD_PACK_MANAGER_NAME="apt"
+        CONFIG_DIR="/etc/apt"
+        return 0
+    elif command -v pacman &> /dev/null; then
+        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mpacman\033[0m"
+        CMD_PACK_MANAGER_INSTALL="sudo pacman -S --noconfirm"
+        CMD_PACK_MANAGER_NAME="pacman"
+        CONFIG_DIR="/etc/pacman.d"
+        return 0
+    elif command -v dnf &> /dev/null; then
+        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mdnf\033[0m"
+        CMD_PACK_MANAGER_INSTALL="sudo dnf install -y"
+        CMD_PACK_MANAGER_NAME="dnf"
+        CONFIG_DIR="/etc/yum"
+        return 0
+    elif command -v yum &> /dev/null; then
+        echo -e "Encontramos seu Gerenciador! Você usa o \033[32myum\033[0m"
+        CMD_PACK_MANAGER_INSTALL="sudo yum install -y"
+        CMD_PACK_MANAGER_NAME="yum"
+        CONFIG_DIR="/etc/yum"
+        return 0
+    elif command -v zypper &> /dev/null; then
+        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mzypper\033[0m"
+        CMD_PACK_MANAGER_INSTALL="sudo zypper install -y"
+        CMD_PACK_MANAGER_NAME="zypper"
+        CONFIG_DIR="/etc/zypp"
+        return 0
     else
-        echo "INVÁLIDO"
+        echo -e "\033[31mQue pena. Não conseguimos encontrar seu instalador. :(\033[0m"
+        while true; do
+            read -rp "Deseja informar manualmente? [S/n] " resposta
+            if valida_resposta_simples "$resposta"; then
+                while true; do
+                    read -rp "Qual é o seu instalador? (ex: apt, dnf, pacman): " resposta_discritiva
+                    CMD_PACK_MANAGER_NAME="$resposta_discritiva"
+                    read -rp "Qual é o parâmetro de instalação? (ex: install, -S): " resposta_discritiva
+                    CMD_PACK_MANAGER_INSTALL="sudo $CMD_PACK_MANAGER_NAME $resposta_discritiva"
+                    read -rp "Qual é o diretório de configuração? (ex: /etc/apt): " CONFIG_DIR
+                    echo -e "\n\033[33mValide as informações:\033[0m"
+                    echo -e "Comando: \033[36m$CMD_PACK_MANAGER_INSTALL pacote\033[0m"
+                    echo -e "Diretório de configuração: \033[36m$CONFIG_DIR\033[0m"
+                    if tem_certeza; then
+                        return 0
+                    else
+                        break
+                    fi
+                done
+            else
+                return 1
+            fi
+        done
     fi
 }
 
-determinar_protocolo() {
-    local protocol="http"
-    { nc -zv -w 2 "$TARGET_IPv4" 443 &>/dev/null || nc -zv -w 2 "$TARGET_IPv6" 443 &>/dev/null; } && protocol="https"
-    echo "$protocol"
-}
+#------------#------------# Mirrors #------------#------------#
 
-substituir_variaveis() {
-    local cmd="$1" ip="$2"
-    local wordlist_subdomains="$WORDLISTS_DIR/SecLists/Discovery/DNS/subdomains-top1million-5000.txt"
-    local wordlist_web="$WORDLISTS_DIR/SecLists/Discovery/Web-Content/common.txt"
-    [ ! -f "$wordlist_subdomains" ] && { wordlist_subdomains="/tmp/subdomains.txt"; curl -s https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-5000.txt -o "$wordlist_subdomains"; }
-    [ ! -f "$wordlist_web" ] && { wordlist_web="/tmp/common.txt"; curl -s https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -o "$wordlist_web"; }
-    local protocol=$(determinar_protocolo)
-    echo "$cmd" | sed "s/{TARGET}/$TARGET/g; s/{TARGET_IP}/$ip/g; s/{PROTOCOL}/$protocol/g; s|{WORDLIST_SUBDOMAINS}|$wordlist_subdomains|g; s|{WORDLIST_WEB}|$wordlist_web|g"
-}
+editar_config_mirrors() {
+    local config_file="tools.conf"
+    local mirrors=(
+        "# Git mirrors"
+        "git_mirror=https://mirrors.edge.kernel.org/pub/software/scm/git/"
+        "git_alt_mirror=https://github.com/git/git"
+        "# Nmap mirrors"
+        "nmap_mirror=https://nmap.org/dist/"
+        "nmap_alt_mirror=https://github.com/nmap/nmap"
+        "# FFuf mirrors (Web Fuzzer)"
+        "ffuf_mirror=https://github.com/ffuf/ffuf"
+        "ffuf_releases=https://github.com/ffuf/ffuf/releases"
+        "ffuf_pkg=github.com/ffuf/ffuf/v2@latest"
+    )
 
-salvar_json() {
-    local json_data="{"
-    json_data+="\"script\": {\"name\": \"Network Recon Script\", \"version\": \"1.2.4\", \"os\": \"$(uname -a | tr -d '\n' | sed 's/[^[:print:]]//g')\", \"start_time\": \"$(date -d @$START_TIME '+%Y-%m-%dT%H:%M:%S%z')\", \"user\": \"$(whoami | tr -d '\n' | sed 's/[^[:print:]]//g')\"},"
-    json_data+="\"target\": {\"input\": \"$TARGET\", \"resolved_ipv4\": \"$TARGET_IPv4\", \"resolved_ipv6\": \"$TARGET_IPv6\", \"type\": \"$TYPE_TARGET\", \"protocol\": \"$(determinar_protocolo)\", \"resolution_time\": \"$(date +'%Y-%m-%dT%H:%M:%S%z')\"},"
-    json_data+="\"tools_config\": {\"nmap\": {\"ipv4_commands\": $(printf '%s\n' "${NMAP_COMMANDS_IPV4[@]}" | jq -R . | jq -s .), \"ipv6_commands\": $(printf '%s\n' "${NMAP_COMMANDS_IPV6[@]}" | jq -R . | jq -s .), \"silence\": \"$NMAP_SILENCE\"}, \"ffuf\": {\"subdomain_commands\": $(printf '%s\n' "${FFUF_COMMANDS[@]}" | jq -R . | jq -s .), \"web_commands\": $(printf '%s\n' "${FFUF_WEB_COMMANDS[@]}" | jq -R . | jq -s .)}, \"attacksurfacemapper\": $(printf '%s\n' "${ASM_COMMANDS[@]}" | jq -R . | jq -s .), \"autorecon\": $(printf '%s\n' "${AR_COMMANDS[@]}" | jq -R . | jq -s .), \"gitleaks\": \"$GL_COMMAND\", \"sherlock\": \"$SH_COMMAND\", \"xray\": \"$XRAY_COMMAND\", \"fierce\": \"$FIERCE_COMMAND\", \"finalrecon\": \"$FR_COMMAND\", \"firewalk\": \"$FW_COMMAND\", \"clusterd\": \"$CL_COMMAND\"},"
-    json_data+="\"dependencies\": {\"jq\": \"$(command -v jq &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"nmap\": \"$(command -v nmap &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"ffuf\": \"$(command -v ffuf &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"python3\": \"$(command -v python3 &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"attacksurfacemapper\": \"$(python3 -m pip show attacksurfacemapper &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"autorecon\": \"$(command -v autorecon &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"gitleaks\": \"$(command -v gitleaks &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"sherlock\": \"$(python3 -m pip show sherlock-project &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"xray\": \"$(command -v xray &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"fierce\": \"$(command -v fierce &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"finalrecon\": \"$(python3 -m pip show finalrecon &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"firewalk\": \"$(command -v firewalk &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"clusterd\": \"$(python3 -m pip show clusterd &>/dev/null && echo 'Instalado' || echo 'Não instalado')\"},"
-    json_data+="\"tests\": ["
-    local success_count=0 failure_count=0
-    for item in "${CHECKLIST[@]}"; do
-        item_sanitized=$(echo "$item" | sed 's/[^[:print:]]//g')
-        IFS=':' read -ra parts <<< "$item_sanitized"
-        test_name=$(echo "${parts[0]}" | xargs)
-        status=$(echo "${parts[1]}" | xargs)
-        message=$(echo "${parts[1]}" | cut -d' ' -f2- | xargs)
-        json_data+="{\"name\": \"$test_name\", \"status\": $([[ "$status" == *"✓"* ]] && echo "true" || echo "false"), \"message\": \"$message\", \"timestamp\": \"$(date +'%Y-%m-%dT%H:%M:%S%z')\", \"details\": {"
-        case $test_name in
-            "Ping"|"Ping Personalizado")
-                json_data+="\"command\": \"ping -c 4 $TARGET_IPv4\", \"packet_loss\": \"${packet_loss:-N/A}\", \"avg_latency\": \"${avg_latency:-N/A}\", \"ipv6_command\": \"ping6 -c 4 $TARGET_IPv6\", \"duration\": \"${TEST_TIMES[$test_name]:-N/A}s\"}"
-                ;;
-            "DNS"|"DNS Personalizado")
-                json_data+="\"command\": \"dig $TARGET +short\", \"resolved_ips\": \"${ips:-N/A}\", \"duration\": \"${TEST_TIMES[$test_name]:-N/A}s\"}"
-                ;;
-            "Porta "*)
-                json_data+="\"port\": \"$(echo $test_name | grep -oP '\d+')\", \"ipv4_command\": \"nc -zv -w 2 $TARGET_IPv4 $(echo $test_name | grep -oP '\d+')\", \"ipv6_command\": \"nc -zv -w 2 $TARGET_IPv6 $(echo $test_name | grep -oP '\d+')\", \"filtered_details\": \"${filtered_details:-N/A}\", \"duration\": \"${TEST_TIMES[$test_name]:-N/A}s\"}"
-                ;;
-            "Nmap"*)
-                json_data+="\"command\": \"${nmap_cmd:-N/A}\", \"open_ports\": \"${open_ports:-N/A}\", \"duration\": \"${TEST_TIMES[$test_name]:-N/A}s\"}"
-                ;;
-            "ffuf"*)
-                json_data+="\"command\": \"${ffuf_cmd:-N/A}\", \"results_count\": \"${results:-N/A}\", \"duration\": \"${TEST_TIMES[$test_name]:-N/A}s\"}"
-                ;;
-            *) json_data+="\"command\": \"N/A\", \"duration\": \"${TEST_TIMES[$test_name]:-N/A}s\"}" ;;
-        esac
-        json_data+="}, \"raw_output_file\": \"$(echo $test_name | tr ' ' '_' | tr -d ':').txt\"},"
-        [[ "$status" == *"✓"* ]] && ((success_count++)) || ((failure_count++))
-    done
-    json_data="${json_data%,]}"
-    json_data+="],\"statistics\": {\"total_tests\": ${#CHECKLIST[@]}, \"success_count\": $success_count, \"failure_count\": $failure_count, \"total_execution_time\": \"$(( $(date +%s) - START_TIME )) seconds\", \"start_time\": \"$PROGRAM_START_TIME\", \"end_time\": \"$(date '+%Y-%m-%dT%H:%M:%S%z')\"}"
-    json_data+="}"
-    echo "$json_data" | jq '.' > "$JSON_FILE" 2>/dev/null || { print_status "error" "Falha ao salvar JSON (verifique se jq está instalado e se o JSON é válido)"; return 1; }
-    print_status "success" "Resultados salvos em $JSON_FILE"
-}
-
-definir_alvo() {
-    print_status "action" "Definindo alvo"
-    local start_time=$SECONDS
-    read -p "Digite o IP, domínio ou URL alvo: " TARGET
-    TYPE_TARGET=$(verificar_tipo_alvo "$TARGET")
-    if [ "$TYPE_TARGET" = "INVÁLIDO" ]; then
-        print_status "error" "Entrada inválida. Digite um IP, domínio ou URL válido."
-        CHECKLIST+=("Alvo definido: ✗ Entrada inválida")
-        TEST_TIMES["Alvo definido"]=$((SECONDS - start_time))
-        salvar_json
+    if [[ ! -w "$(pwd)" ]]; then
+        echo -e "\033[31mErro: Sem permissão para escrever em $(pwd).\033[0m"
         return 1
     fi
-    TARGET=$(echo "$TARGET" | sed -E 's|^https?://||; s|/.*$||; s|:[0-9]+$||')
-    if [ "$TYPE_TARGET" = "DOMAIN" ]; then
-        TARGET_IPv4=$(dig +short A "$TARGET" | grep -oP '^\d+\.\d+\.\d+\.\d+$' | head -1)
-        TARGET_IPv6=$(dig +short AAAA "$TARGET" | grep -oP '^[0-9a-fA-F:]+$' | head -1)
-        if [ -z "$TARGET_IPv4" ] && [ -z "$TARGET_IPv6" ]; then
-            CHECKLIST+=("Resolução de IP: ✗ Não foi possível resolver IP para $TARGET")
-            TEST_TIMES["Resolução de IP"]=$((SECONDS - start_time))
-            salvar_json
+
+    echo -e "\033[34mConfigurando mirrors no arquivo $config_file...\033[0m"
+    
+    if [[ ! -f "$config_file" ]]; then
+        touch "$config_file" || {
+            echo -e "\033[31mErro: Não foi possível criar o arquivo $config_file.\033[0m"
+            return 1
+        }
+        echo -e "\033[33mArquivo $config_file criado.\033[0m"
+        echo "# Security Tools Mirror Configuration" >> "$config_file"
+        echo "# Generated on $(date)" >> "$config_file"
+        echo "# DO NOT EDIT MANUALLY - Use the mirror configuration tool" >> "$config_file"
+        echo "" >> "$config_file"
+    fi
+
+    for mirror in "${mirrors[@]}"; do
+        if [[ "$mirror" == \#* ]]; then
+            if ! grep -Fx "$mirror" "$config_file" > /dev/null; then
+                echo "" >> "$config_file"
+                echo "$mirror" >> "$config_file"
+            fi
+        else
+            if ! grep -Fx "^${mirror%%=*}" "$config_file" > /dev/null; then
+                echo "$mirror" >> "$config_file"
+                echo -e "  \033[32m✓\033[0m Adicionado: ${mirror%%=*}"
+            else
+                echo -e "  \033[33mⓘ\033[0m Já existe: ${mirror%%=*}"
+            fi
+        fi
+    done
+
+    echo -e "\n\033[32mMirror configuration complete!\033[0m"
+    echo -e "Total tools configured: \033[36m$(grep -c '^[^#]' "$config_file")\033[0m"
+    echo -e "Config file location: \033[35m$(pwd)/$config_file\033[0m"
+}
+
+configure_multi_package_mirrors() {
+    local config_file="$CONFIG_DIR/mirrors_multi.conf"
+    local mirrors=(
+        "# Git mirrors"
+        "git_mirror=https://mirrors.edge.kernel.org/pub/software/scm/git/"
+        "git_alt_mirror=https://github.com/git/git"
+        "# Nmap mirrors"
+        "nmap_mirror=https://nmap.org/dist/"
+        "nmap_alt_mirror=https://github.com/nmap/nmap"
+        "# FFuf mirrors (Web Fuzzer)"
+        "ffuf_mirror=https://github.com/ffuf/ffuf"
+        "ffuf_releases=https://github.com/ffuf/ffuf/releases"
+        "ffuf_pkg=github.com/ffuf/ffuf/v2@latest"
+    )
+
+    if [[ ! -d "$CONFIG_DIR" ]]; then
+        echo -e "\033[31mErro: Diretório $CONFIG_DIR não encontrado.\033[0m"
+        return 1
+    fi
+
+    if [[ ! -w "$CONFIG_DIR" ]]; then
+        echo -e "\033[31mErro: Sem permissão para escrever em $CONFIG_DIR. Execute com sudo.\033[0m"
+        return 1
+    fi
+
+    echo -e "\033[34mConfigurando mirrors no arquivo $config_file...\033[0m"
+    
+    if [[ ! -f "$config_file" ]]; then
+        touch "$config_file" || {
+            echo -e "\033[31mErro: Não foi possível criar o arquivo $config_file.\033[0m"
+            return 1
+        }
+        echo -e "\033[33mArquivo $config_file criado.\033[0m"
+        echo "# Mirrors Configuration for Multiple Package Managers" >> "$config_file"
+        echo "# Compatible with apt, yum/dnf, pacman, and others" >> "$config_file"
+        echo "# Generated on $(date)" >> "$config_file"
+        echo "# Format: key=value (parseable by shell and package managers)" >> "$config_file"
+        echo "" >> "$config_file"
+    else
+        echo -e "\033[33mArquivo $config_file já existe, adicionando novos mirrors sem sobrescrever.\033[0m"
+    fi
+
+    for mirror in "${mirrors[@]}"; do
+        if [[ "$mirror" == \#* ]]; then
+            if ! grep -Fx "$mirror" "$config_file" > /dev/null; then
+                echo "" >> "$config_file"
+                echo "$mirror" >> "$config_file"
+            fi
+        else
+            if ! grep -Fx "^${mirror%%=*}" "$config_file" > /dev/null; then
+                echo "$mirror" >> "$config_file"
+                echo -e "  \033[32m✓\033[0m Adicionado: ${mirror%%=*}"
+            else
+                echo -e "  \033[33mⓘ\033[0m Já existe: ${mirror%%=*}"
+            fi
+        fi
+    done
+
+    echo -e "\n\033[32mConfiguração de mirrors concluída!\033[0m"
+    echo -e "Total de ferramentas configuradas: \033[36m$(grep -c '^[^#]' "$config_file")\033[0m"
+    echo -e "Localização do arquivo de configuração: \033[35m$config_file\033[0m"
+    echo -e "\033[34mEste arquivo é compatível com apt, yum/dnf, pacman e outros gerenciadores de pacotes.\033[0m"
+}
+
+setup_wordlists() {
+    local wordlists_dir="$HOME/wordlists"
+    local timestamp=$(date +%Y%m%d_%H%M%S)
+    local log_file="$wordlists_dir/wordlist_setup_${timestamp}.log"
+    
+    if ! command -v git &> /dev/null; then
+        echo -e "\033[31mErro: 'git' não está instalado.\033[0m"
+        echo -e "\033[34mTentando instalar o 'git' com '$CMD_PACK_MANAGER_INSTALL git'...\033[0m"
+        if $CMD_PACK_MANAGER_INSTALL git &>> "$log_file"; then
+            echo -e "\033[32m[√] 'git' instalado com sucesso!\033[0m"
+        else
+            echo -e "\033[31mErro: Falha ao instalar o 'git'. Instale manualmente com '$CMD_PACK_MANAGER_INSTALL git'.\033[0m"
             return 1
         fi
-        [ -n "$TARGET_IPv4" ] && CHECKLIST+=("Resolução IPv4: ✓ $TARGET_IPv4")
-        [ -n "$TARGET_IPv6" ] && CHECKLIST+=("Resolução IPv6: ✓ $TARGET_IPv6")
-    else
-        TARGET_IPv4="$TARGET"
-        CHECKLIST+=("Alvo definido: ✓ $TARGET (IPv4)")
-    end
-    TEST_TIMES["Alvo definido"]=$((SECONDS - start_time))
-    salvar_json
-}
-
-test_ping() {
-    local ip="$1" version="$2"
-    local start_time=$SECONDS
-    local ping_cmd="ping -c 4 $ip" && [ "$version" = "IPv6" ] && ping_cmd="ping6 -c 4 $ip"
-    print_status "action" "Testando PING $version"
-    loading_clock "Testando PING $version" 3 &
-    pid=$!
-    local ping_result=$($ping_cmd 2>&1)
-    if [ $? -eq 0 ]; then
-        packet_loss=$(echo "$ping_result" | grep -oP '\d+(?=% packet loss)')
-        avg_latency=$(echo "$ping_result" | grep -oPm1 '[\d.]+(?=\s*ms$)' | tail -1)
-        CHECKLIST+=("Ping $version: ✓ Sucesso (Perda: ${packet_loss}%, Latência: ${avg_latency}ms)")
-    else
-        CHECKLIST+=("Ping $version: ✗ Falha")
     fi
-    kill -0 $pid 2>/dev/null && kill $pid
-    wait $pid 2>/dev/null
-    TEST_TIMES["Ping $version"]=$((SECONDS - start_time))
-    salvar_json
-}
 
-test_ports() {
-    local ip="$1" version="$2" ports=("${@:3}")
-    for port in "${ports[@]}"; do
-        local start_time=$SECONDS
-        print_status "action" "Testando Porta $port ($version)"
-        loading_clock "Testando Porta $port ($version)" 2 &
-        pid=$!
-        if nc -zv -w 2 "$ip" $port &>/dev/null; then
-            CHECKLIST+=("Porta $port ($version): ✓ Aberta")
-        else
-            CHECKLIST+=("Porta $port ($version): ✗ Fechada")
-        fi
-        kill -0 $pid 2>/dev/null && kill $pid
-        wait $pid 2>/dev/null
-        TEST_TIMES["Porta $port ($version)"]=$((SECONDS - start_time))
-    done
-    salvar_json
-}
-
-analyze_nmap_results() {
-    local xml_file="$1" ip_version="$2"
-    local -n port_status="PORT_STATUS_$ip_version"
-    local -n port_tests="PORT_TESTS_$ip_version"
-    local ports=($(grep -oP 'portid="\d+"' "$xml_file" | cut -d'"' -f2 | sort -u))
-    for port in "${ports[@]}"; do
-        state=$(grep -oP "portid=\"$port\".*state=\"\K[^\"]+(?=\")" "$xml_file" | head -1)
-        port_status["$port"]+="$state,"
-        port_tests["$port"]=$((port_tests["$port"] + 1))
-    done
-}
-
-consolidar_portas() {
-    local ip_version="$1"
-    local -n port_status="PORT_STATUS_$ip_version"
-    local -n port_tests="PORT_TESTS_$ip_version"
-    for port in "${!port_status[@]}"; do
-        local states=(${port_status[$port]//,/ })
-        local open_count=0 closed_count=0 filtered_count=0
-        for state in "${states[@]}"; do
-            case "$state" in
-                "open") ((open_count++)) ;;
-                "closed") ((closed_count++)) ;;
-                "filtered") ((filtered_count++)) ;;
-            esac
-        done
-        local total_tests=${port_tests[$port]}
-        if [ $open_count -eq $total_tests ]; then
-            CHECKLIST+=("Porta $port ($ip_version): ✓ Aberta")
-        elif [ $closed_count -eq $total_tests ]; then
-            CHECKLIST+=("Porta $port ($ip_version): ✗ Fechada")
-        else
-            CHECKLIST+=("Porta $port ($ip_version): ⚠ Filtrada ($open_count aberta & $closed_count fechada & $filtered_count filtrada)")
-        fi
-    done
-}
-
-executar_comando() {
-    local cmd="$1" name="$2" output_file="$3" success_msg="$4" fail_msg="$5"
-    local start_time=$SECONDS
-    print_status "action" "Executando $name"
-    local temp_output=$(mktemp)
-    if $cmd >"$temp_output" 2>&1; then
-        local results=$(wc -l < "$temp_output")
-        [ "$results" -gt 0 ] && CHECKLIST+=("$name: ✓ $success_msg $results") || CHECKLIST+=("$name: ✓ $fail_msg")
-    else
-        CHECKLIST+=("$name: ✗ Falha")
-    fi
-    mv "$temp_output" "$output_file"
-    TEST_TIMES["$name"]=$((SECONDS - start_time))
-}
-
-testar_ferramenta() {
-    local tool="$1" cmd="$2" success_msg="$3" fail_msg="$4"
-    local start_time=$SECONDS
-    if ! command -v ${tool,,} &>/dev/null && ! python3 -m pip show ${tool,,} &>/dev/null; then
-        CHECKLIST+=("$tool: ✗ Não instalado")
-        TEST_TIMES["$tool"]=$((SECONDS - start_time))
+    if [[ ! -w "$HOME" ]]; then
+        echo -e "\033[31mErro: Sem permissão para escrever em $HOME.\033[0m"
         return 1
     fi
-    local output_file="${tool,,}_output.txt"
-    local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
-    loading_clock "$tool" 10 &
-    pid=$!
-    executar_comando "$cmd_substituido" "$tool" "$output_file" "$success_msg" "$fail_msg"
-    kill -0 $pid 2>/dev/null && kill $pid
-    wait $pid 2>/dev/null
-    TEST_TIMES["$tool"]=$((SECONDS - start_time))
-}
 
-#------------#------------# FUNÇÕES DE TESTE #------------#------------#
-Passivo_basico() {
-    print_status "info" "Executando testes PASSIVOS BÁSICOS em $TARGET"
-    local start_time=$SECONDS
-    loading_clock "Testes Passivos Básicos" 3 &
-    pid=$!
-    if [ "$TYPE_TARGET" = "DOMAIN" ] && whois "$TARGET" &>/dev/null; then
-        CHECKLIST+=("WHOIS: ✓ Informações obtidas")
+    declare -A wordlist_repos=(
+        ["SecLists"]="https://github.com/danielmiessler/SecLists"
+        ["dadoware"]="https://github.com/thoughtworks/dadoware"
+        ["awesome-wordlists"]="https://github.com/gmelodie/awesome-wordlists"
+    )
+    
+    echo -e "\033[34m[+] Configurando wordlists no diretório home...\033[0m"
+    
+    if [[ ! -d "$wordlists_dir" ]]; then
+        mkdir -p "$wordlists_dir" || {
+            echo -e "\033[31m[-] Falha ao criar o diretório de wordlists em $wordlists_dir\033[0m" | tee -a "$log_file"
+            return 1
+        }
+        echo -e "\033[32m[+] Diretório criado: $wordlists_dir\033[0m" | tee -a "$log_file"
     else
-        CHECKLIST+=("WHOIS: ✗ Falha ou não aplicável")
+        echo -e "\033[33m[!] Diretório de wordlists já existe em $wordlists_dir\033[0m" | tee -a "$log_file"
     fi
-    [ "$TYPE_TARGET" = "DOMAIN" ] && CHECKLIST+=("DNS Histórico: ⚠ Simulado")
-    [ "$TYPE_TARGET" = "DOMAIN" ] && CHECKLIST+=("Threat Intel: ⚠ Simulado")
-    kill -0 $pid 2>/dev/null && kill $pid
-    wait $pid 2>/dev/null
-    TEST_TIMES["Passivo Básico"]=$((SECONDS - start_time))
-    salvar_json
-}
-
-Passivo_complexo() {
-    [ "$TYPE_TARGET" != "DOMAIN" ] && { print_status "error" "Passivo Complexo: Requer domínio"; CHECKLIST+=("Passivo Complexo: ✗ Requer domínio"); TEST_TIMES["Passivo Complexo"]=$((SECONDS - start_time)); salvar_json; return 1; }
-    print_status "info" "Executando testes PASSIVOS COMPLEXOS em $TARGET"
-    local start_time=$SECONDS
-    if ! command -v python3 &>/dev/null; then
-        CHECKLIST+=("Python3: ✗ Não instalado")
-        TEST_TIMES["Passivo Complexo"]=$((SECONDS - start_time))
-        salvar_json
-        return 1
-    fi
-    python_version=$(python3 --version | grep -oP '\d+\.\d+\.\d+')
-    python_major=$(echo $python_version | cut -d'.' -f1)
-    python_minor=$(echo $python_version | cut -d'.' -f2)
-    if [ $python_major -lt 3 ] || { [ $python_major -eq 3 ] && [ $python_minor -lt 7 ]; }; then
-        CHECKLIST+=("Python: ✗ Versão 3.7+ necessária")
-        TEST_TIMES["Passivo Complexo"]=$((SECONDS - start_time))
-        salvar_json
-        return 1
-    fi
-    for tool in "AttackSurfaceMapper" "FFuf Subdomains" "Gitleaks" "Sherlock" "Fierce" "FinalRecon"; do
-        read -p "Deseja executar $tool para $TARGET? (s/n): " ASK
-        if [ "$ASK" = "s" ] || [ "$ASK" = "S" ]; then
-            case $tool in
-                "AttackSurfaceMapper") testar_ferramenta "AttackSurfaceMapper" "${ASM_COMMANDS[0]}" "Subdomínios encontrados:" "Nenhum subdomínio encontrado" ;;
-                "FFuf Subdomains") testar_ferramenta "ffuf" "${FFUF_COMMANDS[0]}" "Subdomínios encontrados:" "Nenhum subdomínio encontrado" ;;
-                "Gitleaks") testar_ferramenta "gitleaks" "$GL_COMMAND" "Vazamentos encontrados:" "Nenhum vazamento encontrado" ;;
-                "Sherlock") testar_ferramenta "sherlock" "$SH_COMMAND" "Perfis encontrados:" "Nenhum perfil encontrado" ;;
-                "Fierce") testar_ferramenta "fierce" "$FIERCE_COMMAND" "Subdomínios encontrados:" "Nenhum subdomínio encontrado" ;;
-                "FinalRecon") testar_ferramenta "finalrecon" "$FR_COMMAND" "Linhas de resultados:" "Nenhum resultado encontrado" ;;
-            esac
-            salvar_json
+    
+    for repo in "${!wordlist_repos[@]}"; do
+        local repo_dir="${wordlists_dir}/${repo}"
+        local repo_url="${wordlist_repos[$repo]}"
+        
+        echo -e "\n\033[36mProcessando ${repo}...\033[0m" | tee -a "$log_file"
+        
+        if [[ -d "$repo_dir" ]]; then
+            cd "$repo_dir" || continue
+            git pull --quiet 2>> "$log_file" && {
+                echo -e "\033[32m[√] ${repo} atualizado com sucesso\033[0m" | tee -a "$log_file"
+                cd - > /dev/null || return 1
+            } || {
+                echo -e "\033[31m[!] Falha ao atualizar ${repo}\033[0m" | tee -a "$log_file"
+                cd - > /dev/null || return 1
+            }
+        else
+            git clone --depth 1 "$repo_url" "$repo_dir" --quiet 2>> "$log_file" && {
+                echo -e "\033[32m[√] ${repo} clonado com sucesso\033[0m" | tee -a "$log_file"
+            } || {
+                echo -e "\033[31m[!] Falha ao clonar ${repo}\033[0m" | tee -a "$log_file"
+            }
+        fi
+        
+        if [[ "$repo" == "SecLists" && -f "${repo_dir}/Discovery/Web-Content/raft-large-directories.txt" ]]; then
+            ln -sf "${repo_dir}/Discovery/Web-Content/raft-large-directories.txt" "${wordlists_dir}/web_directories.txt" 2>/dev/null
+            ln -sf "${repo_dir}/Passwords/Common-Credentials/top-20-common-SSH-passwords.txt" "${wordlists_dir}/ssh_passwords.txt" 2>/dev/null
+            ln -sf "${repo_dir}/Discovery/DNS/subdomains-top1million-5000.txt" "${wordlists_dir}/subdomains.txt" 2>/dev/null
         fi
     done
-    TEST_TIMES["Passivo Complexo"]=$((SECONDS - start_time))
+    
+    mkdir -p "${wordlists_dir}/custom" "${wordlists_dir}/merged" 2>/dev/null
+    
+    echo -e "\n\033[32m[+] Configuração de wordlists concluída!\033[0m" | tee -a "$log_file"
+    echo -e "Diretório de wordlists: \033[35m${wordlists_dir}\033[0m"
+    echo -e "Arquivo de log: \033[35m${log_file}\033[0m"
+    echo -e "\n\033[33mRecomendação: Execute esta função periodicamente para atualizar as wordlists\033[0m"
+    
+    if [[ ":$PATH:" != *":$wordlists_dir:"* ]]; then
+        echo -e "\n\033[36mConsidere adicionar ao seu PATH:\033[0m"
+        echo "echo 'export PATH=\"\$PATH:$wordlists_dir\"' >> ~/.bashrc"
+    fi
 }
 
-Ativo_basico() {
-    print_status "info" "Executando testes ATIVOS BÁSICOS em $TARGET"
-    local start_time=$SECONDS
-    loading_clock "Testes Ativos Básicos" 3 &
-    pid=$!
-    [ -n "$TARGET_IPv4" ] && test_ping "$TARGET_IPv4" "IPv4"
-    [ -n "$TARGET_IPv6" ] && test_ping "$TARGET_IPv6" "IPv6"
-    [ "$TYPE_TARGET" = "DOMAIN" ] && {
-        loading_clock "Teste DNS" 3 &
-        pid=$!
-        local dns_result=$(dig "$TARGET" +short 2>&1)
-        if [ -n "$dns_result" ]; then
-            local ips=$(echo "$dns_result" | grep -oP '(\d+\.){3}\d+|[0-9a-fA-F:]+' | tr '\n' ',' | sed 's/,$//')
-            CHECKLIST+=("DNS: ✓ Resolvido (IPs: $ips)")
-        else
-            CHECKLIST+=("DNS: ✗ Falha")
-        fi
-        kill -0 $pid 2>/dev/null && kill $pid
-        wait $pid 2>/dev/null
+install_tools() {
+    local timestamp=$(date +%Y%m%d_%H%M%S)
+    local log_file="$HOME/install_tools_${timestamp}.log"
+    local requirements_file="requirements.txt"
+    
+    echo -e "\033[34m[+] Instalando ferramentas de segurança a partir de $requirements_file...\033[0m" | tee -a "$log_file"
+
+    if [[ ! -f "$requirements_file" ]]; then
+        echo -e "\033[31mErro: O arquivo $requirements_file não foi encontrado. Criando um padrão.\033[0m" | tee -a "$log_file"
+        cat > "$requirements_file" <<EOL
+python3
+pip
+nmap
+ffuf
+attacksurfacemapper
+autorecon
+gitleaks
+sherlock-project
+xray
+fierce
+finalrecon
+firewalk
+clusterd
+git
+go
+EOL
+        echo -e "\033[33mArquivo $requirements_file criado com dependências padrão.\033[0m" | tee -a "$log_file"
     }
-    loading_clock "Teste de Portas" 5 &
-    pid=$!
-    [ -n "$TARGET_IPv4" ] && test_ports "$TARGET_IPv4" "IPv4" 22 80 443 8080 8443
-    [ -n "$TARGET_IPv6" ] && test_ports "$TARGET_IPv6" "IPv6" 22 80 443 8080 8443
-    kill -0 $pid 2>/dev/null && kill $pid
-    wait $pid 2>/dev/null
-    TEST_TIMES["Ativo Básico"]=$((SECONDS - start_time))
-    salvar_json
-}
 
-Ativo_complexo() {
-    print_status "info" "Executando testes ATIVOS COMPLEXOS em $TARGET"
-    local start_time=$SECONDS
-    [ -z "$TARGET" ] && definir_alvo
-    [ "$TYPE_TARGET" = "INVÁLIDO" ] && { print_status "error" "Alvo inválido"; TEST_TIMES["Ativo Complexo"]=$((SECONDS - start_time)); return 1; }
-    for cmd in nmap ffuf python3; do
-        if ! command -v $cmd &>/dev/null; then
-            CHECKLIST+=("$cmd: ✗ Não instalado")
-            TEST_TIMES["Ativo Complexo"]=$((SECONDS - start_time))
-            salvar_json
-            return 1
+    mapfile -t tools < "$requirements_file"
+    declare -A tool_methods=(
+        ["nmap"]="package"
+        ["ffuf"]="go:github.com/ffuf/ffuf/v2@latest"
+        ["attacksurfacemapper"]="pip:attacksurfacemapper"
+        ["autorecon"]="pip:autorecon"
+        ["gitleaks"]="go:github.com/zricethezav/gitleaks/v8@latest"
+        ["sherlock-project"]="pip:sherlock-project"
+        ["xray"]="manual:https://github.com/evilsocket/xray/releases"
+        ["fierce"]="pip:fierce"
+        ["finalrecon"]="pip:finalrecon"
+        ["firewalk"]="manual:https://github.com/0x90/firewalk"
+        ["clusterd"]="pip:clusterd"
+        ["git"]="package"
+        ["go"]="package"
+        ["python3"]="package"
+        ["pip"]="package"
+    )
+
+    for tool in "${tools[@]}"; do
+        [[ -z "$tool" || "$tool" =~ ^# ]] && continue
+        echo -e "\n\033[36mProcessando $tool...\033[0m" | tee -a "$log_file"
+
+        if [[ "${tool_methods[$tool]}" == "package" || "${tool_methods[$tool]}" == "pip" || "${tool_methods[$tool]}" == "go" || "${tool_methods[$tool]}" == "manual"* ]]; then
+            install_method="${tool_methods[$tool]%%:*}"
+            install_source="${tool_methods[$tool]#*:}"
+            [ "$install_method" == "$tool" ] && install_source=""
+        else
+            echo -e "\033[33m[!] Método de instalação para $tool não definido. Usando 'package' como padrão.\033[0m" | tee -a "$log_file"
+            install_method="package"
+            install_source=""
         fi
-    done
-    python_version=$(python3 --version | grep -oP '\d+\.\d+\.\d+')
-    python_major=$(echo $python_version | cut -d'.' -f1)
-    python_minor=$(echo $python_version | cut -d'.' -f2)
-    if [ $python_major -lt 3 ] || { [ $python_major -eq 3 ] && [ $python_minor -lt 7 ]; }; then
-        CHECKLIST+=("Python: ✗ Versão 3.7+ necessária")
-        TEST_TIMES["Ativo Complexo"]=$((SECONDS - start_time))
-        salvar_json
-        return 1
-    fi
-    read -p "Deseja executar o Nmap em modo silencioso (-Pn)? (s/n): " ASK
-    [ "$ASK" = "s" ] || [ "$ASK" = "S" ] && NMAP_SILENCE="-Pn"
-    
-    # Limpar arrays de portas antes de novas varreduras
-    unset PORT_STATUS_IPV4 PORT_STATUS_IPV6 PORT_TESTS_IPV4 PORT_TESTS_IPV6
-    declare -A PORT_STATUS_IPV4 PORT_STATUS_IPV6 PORT_TESTS_IPV4 PORT_TESTS_IPV6
 
-    if [ -n "$TARGET_IPv4" ]; then
-        print_status "action" "Executando varredura Nmap (IPv4)"
-        for ((i=0; i<${#NMAP_COMMANDS_IPV4[@]}; i++)); do
-            loading_clock "Teste Nmap IPv4 ($((i+1))/${#NMAP_COMMANDS_IPV4[@]})" 10 &
-            pid=$!
-            local nmap_output=$(mktemp)
-            local nmap_cmd=$(substituir_variaveis "${NMAP_COMMANDS_IPV4[$i]}" "$TARGET_IPv4")
-            print_status "info" "Comando: $nmap_cmd"
-            if $nmap_cmd -oX "$nmap_output" &>/dev/null; then
-                analyze_nmap_results "$nmap_output" "IPv4"
-                CHECKLIST+=("Nmap IPv4 Teste $((i+1)): ✓ Concluído")
-            else
-                CHECKLIST+=("Nmap IPv4 Teste $((i+1)): ✗ Falha")
+        if [ "$install_method" = "pip" ]; then
+            if python3 -m pip show "$tool" &>/dev/null; then
+                echo -e "\033[33m[!] $tool já está instalado.\033[0m" | tee -a "$log_file"
+                continue
             fi
-            rm -f "$nmap_output"
-            kill -0 $pid 2>/dev/null && kill $pid
-            wait $pid 2>/dev/null
-            TEST_TIMES["Nmap IPv4 Teste $((i+1))"]=$((SECONDS - start_time))
-        done
-        consolidar_portas "IPv4"
-        salvar_json
-    fi
-    if [ -n "$TARGET_IPv6" ]; then
-        print_status "action" "Executando varredura Nmap (IPv6)"
-        for ((i=0; i<${#NMAP_COMMANDS_IPV6[@]}; i++)); do
-            loading_clock "Teste Nmap IPv6 ($((i+1))/${#NMAP_COMMANDS_IPV6[@]})" 10 &
-            pid=$!
-            local nmap_output=$(mktemp)
-            local nmap_cmd=$(substituir_variaveis "${NMAP_COMMANDS_IPV6[$i]}" "$TARGET_IPv6")
-            print_status "info" "Comando: $nmap_cmd"
-            if $nmap_cmd -oX "$nmap_output" &>/dev/null; then
-                analyze_nmap_results "$nmap_output" "IPv6"
-                CHECKLIST+=("Nmap IPv6 Teste $((i+1)): ✓ Concluído")
-            else
-                CHECKLIST+=("Nmap IPv6 Teste $((i+1)): ✗ Falha")
+        elif [[ "$tool" = "gitleaks" || "$tool" = "ffuf" || "$tool" = "go" || "$tool" = "git" || "$tool" = "python3" || "$tool" = "pip" || "$tool" = "nmap" ]]; then
+            if command -v "$tool" &>/dev/null; then
+                echo -e "\033[33m[!] $tool já está instalado.\033[0m" | tee -a "$log_file"
+                continue
             fi
-            rm -f "$nmap_output"
-            kill -0 $pid 2>/dev/null && kill $pid
-            wait $pid 2>/dev/null
-            TEST_TIMES["Nmap IPv6 Teste $((i+1))"]=$((SECONDS - start_time))
-        done
-        consolidar_portas "IPv6"
-        salvar_json
-    fi
-    if [ "$TYPE_TARGET" = "DOMAIN" ] && { nc -zv -w 2 "$TARGET_IPv4" 80 &>/dev/null || nc -zv -w 2 "$TARGET_IPv4" 443 &>/dev/null || nc -zv -w 2 "$TARGET_IPv6" 80 &>/dev/null || nc -zv -w 2 "$TARGET_IPv6" 443 &>/dev/null; }; then
-        for ((i=0; i<${#FFUF_WEB_COMMANDS[@]}; i++)); do
-            local ffuf_type
-            case $i in
-                0|2) ffuf_type="páginas" ;;
-                1) ffuf_type="extensões de arquivos" ;;
-            esac
-            read -p "Deseja executar FFuf Web (teste de $ffuf_type) Teste $((i+1)) para $TARGET? (s/n): " ASK
-            if [ "$ASK" = "s" ] || [ "$ASK" = "S" ]; then
-                local start_time=$SECONDS
-                testar_ferramenta "ffuf" "${FFUF_WEB_COMMANDS[$i]}" "Diretórios encontrados ($ffuf_type):" "Nenhum diretório encontrado ($ffuf_type)"
-                TEST_TIMES["ffuf Web Teste $((i+1)) ($ffuf_type)"]=$((SECONDS - start_time))
-                salvar_json
+        elif [[ "$tool" = "xray" || "$tool" = "firewalk" ]]; then
+            if command -v "$tool" &>/dev/null; then
+                echo -e "\033[33m[!] $tool já está instalado.\033[0m" | tee -a "$log_file"
+                continue
             fi
-        done
-        for ((i=0; i<${#FFUF_COMMANDS[@]}; i++)); do
-            read -p "Deseja executar FFuf Subdomains (teste de subdomínios) Teste $((i+1)) para $TARGET? (s/n): " ASK
-            if [ "$ASK" = "s" ] || [ "$ASK" = "S" ]; then
-                local start_time=$SECONDS
-                testar_ferramenta "ffuf" "${FFUF_COMMANDS[$i]}" "Subdomínios encontrados:" "Nenhum subdomínio encontrado"
-                TEST_TIMES["ffuf Subdomains Teste $((i+1))"]=$((SECONDS - start_time))
-                salvar_json
-            fi
-        done
-    else
-        CHECKLIST+=("FFuf Web: ✗ Portas HTTP/HTTPS não abertas")
-        TEST_TIMES["FFuf Web"]=$((SECONDS - start_time))
-        salvar_json
-    fi
-    for tool in "AutoRecon" "XRay" "Firewalk" "Clusterd"; do
-        read -p "Deseja executar $tool para $TARGET? (s/n): " ASK
-        if [ "$ASK" = "s" ] || [ "$ASK" = "S" ]; then
-            local start_time=$SECONDS
-            case $tool in
-                "AutoRecon") testar_ferramenta "autorecon" "${AR_COMMANDS[0]}" "Arquivos de resultado gerados:" "Nenhum resultado gerado" ;;
-                "XRay") testar_ferramenta "xray" "$XRAY_COMMAND" "Vulnerabilidades encontradas:" "Nenhuma vulnerabilidade encontrada" ;;
-                "Firewalk") testar_ferramenta "firewalk" "$FW_COMMAND" "Regras de firewall mapeadas:" "Nenhuma regra encontrada" ;;
-                "Clusterd") testar_ferramenta "clusterd" "$CL_COMMAND" "Resultados encontrados:" "Nenhum resultado encontrado" ;;
-            esac
-            TEST_TIMES["$tool"]=$((SECONDS - start_time))
-            salvar_json
         fi
-    done
-    TEST_TIMES["Ativo Complexo"]=$((SECONDS - start_time))
-}
 
-#------------#------------# MENUS #------------#------------#
-menu_personalizado() {
-    while true; do
-        clear
-        print_status "info" "Menu de Ferramentas de Rede (PERSONALIZADO)"
-        echo "1. Teste de Ping"
-        echo "2. Teste DNS"
-        echo "3. Teste de Portas"
-        echo "4. Teste HTTP"
-        echo "5. Teste WHOIS"
-        echo "6. Teste Passivo Completo"
-        echo "7. Teste Ativo Completo"
-        echo "8. Voltar ao menu principal"
-        read -p "Escolha uma opção (1-8): " OPCAO
-        case $OPCAO in
-            1)
-                [ -z "$TARGET" ] && definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                [ -n "$TARGET_IPv4" ] && test_ping "$TARGET_IPv4" "IPv4"
-                [ -n "$TARGET_IPv6" ] && test_ping "$TARGET_IPv6" "IPv6"
-                ;;
-            2)
-                [ -z "$TARGET" ] && definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                [ "$TYPE_TARGET" = "DOMAIN" ] && {
-                    local start_time=$SECONDS
-                    loading_clock "Teste DNS" 3 &
-                    pid=$!
-                    local dns_result=$(dig "$TARGET" +short 2>&1)
-                    if [ -n "$dns_result" ]; then
-                        local ips=$(echo "$dns_result" | grep -oP '(\d+\.){3}\d+|[0-9a-fA-F:]+' | tr '\n' ',' | sed 's/,$//')
-                        CHECKLIST+=("DNS Personalizado: ✓ Resolvido (IPs: $ips)")
-                    else
-                        CHECKLIST+=("DNS Personalizado: ✗ Falha")
-                    fi
-                    kill -0 $pid 2>/dev/null && kill $pid
-                    wait $pid 2>/dev/null
-                    TEST_TIMES["DNS Personalizado"]=$((SECONDS - start_time))
-                }
-                ;;
-            3)
-                [ -z "$TARGET" ] && definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                read -p "Digite as portas a testar (ex: 22,80,443): " PORTS
-                IFS=',' read -ra PORT_ARRAY <<< "$PORTS"
-                [ -n "$TARGET_IPv4" ] && test_ports "$TARGET_IPv4" "IPv4" "${PORT_ARRAY[@]}"
-                [ -n "$TARGET_IPv6" ] && test_ports "$TARGET_IPv6" "IPv6" "${PORT_ARRAY[@]}"
-                ;;
-            4)
-                [ -z "$TARGET" ] && definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                if [ "$TYPE_TARGET" = "DOMAIN" ]; then
-                    local start_time=$SECONDS
-                    local protocol=$(determinar_protocolo)
-                    loading_clock "Teste HTTP ($protocol)" 3 &
-                    pid=$!
-                    http_code=$(curl -sI "$protocol://$TARGET" | head -1 | cut -d' ' -f2)
-                    if [ -n "$http_code" ]; then
-                        CHECKLIST+=("HTTP ($protocol): ✓ Código $http_code")
-                    else
-                        CHECKLIST+=("HTTP ($protocol): ✗ Falha")
-                    fi
-                    kill -0 $pid 2>/dev/null && kill $pid
-                    wait $pid 2>/dev/null
-                    TEST_TIMES["HTTP ($protocol)"]=$((SECONDS - start_time))
+        case $install_method in
+            package)
+                echo -e "\033[34mTentando instalar $tool com $CMD_PACK_MANAGER_INSTALL...\033[0m" | tee -a "$log_file"
+                ( $CMD_PACK_MANAGER_INSTALL "$tool" &>> "$log_file" ) &
+                loading_animation $! "Instalando $tool"
+                if command -v "$tool" &>/dev/null; then
+                    echo -e "\033[32m[√] $tool instalado com sucesso!\033[0m" | tee -a "$log_file"
                 else
-                    CHECKLIST+=("HTTP: ✗ Teste requer domínio")
-                    TEST_TIMES["HTTP"]=$((SECONDS - start_time))
+                    echo -e "\033[31m[!] Falha ao instalar $tool com $CMD_PACK_MANAGER_NAME.\033[0m" | tee -a "$log_file"
                 fi
                 ;;
-            5)
-                [ -z "$TARGET" ] && definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                [ "$TYPE_TARGET" = "DOMAIN" ] && {
-                    local start_time=$SECONDS
-                    loading_clock "Teste WHOIS" 3 &
-                    pid=$!
-                    if whois "$TARGET" &>/dev/null; then
-                        CHECKLIST+=("WHOIS Personalizado: ✓ Informações obtidas")
-                    else
-                        CHECKLIST+=("WHOIS Personalizado: ✗ Falha")
-                    fi
-                    kill -0 $pid 2>/dev/null && kill $pid
-                    wait $pid 2>/dev/null
-                    TEST_TIMES["WHOIS Personalizado"]=$((SECONDS - start_time))
-                }
+            pip)
+                echo -e "\033[34mTentando instalar $tool com pip3...\033[0m" | tee -a "$log_file"
+                ( python3 -m pip install "$install_source" &>> "$log_file" ) &
+                loading_animation $! "Instalando $tool"
+                if python3 -m pip show "$tool" &>/dev/null; then
+                    echo -e "\033[32m[√] $tool instalado com sucesso!\033[0m" | tee -a "$log_file"
+                else
+                    echo -e "\033[31m[!] Falha ao instalar $tool com pip.\033[0m" | tee -a "$log_file"
+                fi
                 ;;
-            6)
-                [ -z "$TARGET" ] && definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                Passivo_basico
-                Passivo_complexo
+            go)
+                echo -e "\033[34mTentando instalar $tool com go install...\033[0m" | tee -a "$log_file"
+                if ! command -v go &>/dev/null; then
+                    echo -e "\033[34mGo não está instalado. Tentando instalar com $CMD_PACK_MANAGER_INSTALL...\033[0m" | tee -a "$log_file"
+                    ( $CMD_PACK_MANAGER_INSTALL go &>> "$log_file" ) &
+                    loading_animation $! "Instalando Go"
+                fi
+                ( go install "$install_source" &>> "$log_file" ) &
+                loading_animation $! "Instalando $tool"
+                if command -v "$tool" &>/dev/null; then
+                    echo -e "\033[32m[√] $tool instalado com sucesso!\033[0m" | tee -a "$log_file"
+                else
+                    echo -e "\033[31m[!] Falha ao instalar $tool com go install.\033[0m" | tee -a "$log_file"
+                fi
                 ;;
-            7)
-                [ -z "$TARGET" ] && definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                Ativo_basico
-                Ativo_complexo
+            manual)
+                echo -e "\033[33m[!] $tool requer instalação manual. Visite: $install_source\033[0m" | tee -a "$log_file"
                 ;;
-            8) break ;;
-            *) print_status "error" "Opção inválida" ;;
-        esac
-        salvar_json
-    done
-}
-
-menu_inicial() {
-    if ! command -v jq &>/dev/null; then
-        print_status "info" "Instalando jq..."
-        sudo apt-get install -y jq >/dev/null || sudo yum install -y jq >/dev/null
-    fi
-    if ! command -v dig &>/dev/null; then
-        print_status "info" "Instalando dnsutils..."
-        sudo apt-get install -y dnsutils >/dev/null || sudo yum install -y bind-utils >/dev/null
-    fi
-    while true; do
-        clear
-        print_status "info" "MENU INICIAL"
-        echo "1. PASSIVO + ATIVO"
-        echo "2. ATIVO + PASSIVO"
-        echo "3. PASSIVO"
-        echo "4. ATIVO"
-        echo "5. PERSONALIZADO"
-        echo "6. SAIR"
-        read -p "Escolha uma estratégia (1-6): " estrategia
-        case $estrategia in
-            1) definir_alvo; [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue; Passivo_basico; Passivo_complexo; Ativo_basico; Ativo_complexo ;;
-            2) definir_alvo; [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue; Ativo_basico; Ativo_complexo; Passivo_basico; Passivo_complexo ;;
-            3) definir_alvo; [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue; Passivo_basico; Passivo_complexo ;;
-            4) definir_alvo; [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue; Ativo_basico; Ativo_complexo ;;
-            5) menu_personalizado ;;
-            6) print_status "info" "Saindo..."; exit 0 ;;
-            *) print_status "error" "Opção inválida" ;;
         esac
     done
-    # Exibir tempos de execução no final
-    echo -e "\n${GREEN}=== Tempos de Execução dos Testes ===${NC}"
-    for test in "${!TEST_TIMES[@]}"; do
-        echo -e "${GREEN}✔ $test: ${CYAN}${TEST_TIMES[$test]} segundos${NC}"
-    done
-    echo -e "${GREEN}=== Início: $PROGRAM_START_TIME | Término: $(date '+%Y-%m-%dT%H:%M:%S%z') ===${NC}"
+
+    echo -e "\n\033[32m[+] Instalação de ferramentas concluída!\033[0m" | tee -a "$log_file"
+    echo -e "Arquivo de log: \033[35m$log_file\033[0m"
 }
 
-# Inicia o script
-validar_root
-menu_inicial
+main() {
+    echo -e "\n\033[34mBem-vindo à ferramenta de instalação\033[0m\n"
+    sleep 1
+
+    (sleep 3) &
+    loading_animation $! "Aguarde enquanto encontramos seu gerenciador de pacotes"
+    
+    if detect_package_manager; then
+        echo -e "\n\033[32mConfiguração do gerenciador concluída com sucesso!\033[0m"
+        echo -e "Gerenciador: \033[36m$CMD_PACK_MANAGER_NAME\033[0m"
+        echo -e "Comando de instalação: \033[36m$CMD_PACK_MANAGER_INSTALL\033[0m"
+        echo -e "Diretório de configuração: \033[36m$CONFIG_DIR\033[0m"
+        
+        (sleep 3) &
+        loading_animation $! "Aguarde enquanto configuramos os mirrors"
+        configure_multi_package_mirrors
+        
+        (sleep 3) &
+        loading_animation $! "Aguarde enquanto configuramos as wordlists"
+        setup_wordlists
+        
+        (sleep 3) &
+        loading_animation $! "Aguarde enquanto instalamos as ferramentas"
+        install_tools
+    else
+        echo -e "\n\033[33mNenhum gerenciador de pacotes foi configurado.\033[0m"
+    fi
+    
+    (sleep 3) &
+    loading_animation $! "Aguarde enquanto configuramos tools.conf"
+    editar_config_mirrors
+}
+
+main
