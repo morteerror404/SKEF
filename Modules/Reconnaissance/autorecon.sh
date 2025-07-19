@@ -1,18 +1,18 @@
 #!/bin/bash
 
-#------------#------------# GLOBAL VARIABLES #------------#------------#
+#------------#------------# VARIÁVEIS GLOBAIS #------------#------------#
 ASK=""
 TARGET=""
 TARGET_IPv4=""
 TARGET_IPv6=""
 TYPE_TARGET=""
 CHECKLIST=()
-JSON_FILE="scan_results_$(date +%s).json"
+JSON_FILE="scan_results_$(date +%s).json" # Adiciona timestamp para evitar sobrescrita
 WORDLISTS_DIR="$HOME/wordlists"
 NMAP_SILENCE=""
 START_TIME=$(date +%s)
 
-# Tool Commands
+#------------#------------# VARIÁVEIS COMANDOS #------------#------------#
 NMAP_COMMANDS_IPV4=(
     "nmap {TARGET_IP} --top-ports 100 -T4 -v $NMAP_SILENCE"
     "nmap {TARGET_IP} -vv -O $NMAP_SILENCE"
@@ -55,7 +55,7 @@ FR_COMMAND="python3 -m finalrecon --full {PROTOCOL}://{TARGET} --out finalrecon_
 FW_COMMAND="firewalk -S1-1024 -i eth0 -n {TARGET_IP} -o firewalk_output.txt"
 CL_COMMAND="python3 -m clusterd -t {TARGET} -o clusterd_output.txt"
 
-#------------#------------# HELPER FUNCTIONS #------------#------------#
+#------------#------------# FUNÇÕES AUXILIARES #------------#------------#
 print_status() {
     local color="$1" message="$2"
     case "$color" in
@@ -66,11 +66,25 @@ print_status() {
     esac
 }
 
+print_clock_frame() {
+    local frame=$1 task=$2 hora=$(date +"%H:%M:%S")
+    echo -e "\n   ______"
+    echo " /________\\"
+    echo " |$hora|"
+    echo " |________|"
+    [ "$frame" -eq 1 ] && echo -e " |........|\n |........|" || echo -e " |        |\n |        |"
+    echo " \\ ______ /"
+    echo -e "\nExecutando: $task ($TARGET)"
+    echo -e "\nChecklist:"
+    for item in "${CHECKLIST[@]}"; do
+        echo " - $item"
+    done
+}
+
 loading_clock() {
-    local task="$1" duration="$2"
-    local chars="/-\|"
+    local task="$1" duration=${2:-3} end_time=$((SECONDS + duration)) chars="/-\|"
     local i=0
-    while [ $i -lt $((duration*4)) ]; do
+    while [ $SECONDS -lt $end_time ]; do
         printf "\r$task [${chars:$((i%4)):1}]"
         sleep 0.25
         ((i++))
@@ -79,8 +93,7 @@ loading_clock() {
 }
 
 verificar_tipo_alvo() {
-    local entrada="$1"
-    entrada=$(echo "$entrada" | sed -E 's|^https?://||; s|/.*$||; s|:[0-9]+$||')
+    local entrada=$(echo "$1" | sed -E 's|^https?://||; s|/.*$||; s|:[0-9]+$||')
     if [[ $entrada =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
         echo "IP"
     elif [[ $entrada =~ ^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$ ]]; then
@@ -102,7 +115,6 @@ definir_alvo() {
         salvar_json
         return 1
     fi
-
     TARGET=$(echo "$TARGET" | sed -E 's|^https?://||; s|/.*$||; s|:[0-9]+$||')
     if [ "$TYPE_TARGET" = "DOMAIN" ]; then
         TARGET_IPv4=$(dig +short A "$TARGET" | grep -oP '^\d+\.\d+\.\d+\.\d+$' | head -1)
@@ -155,17 +167,17 @@ salvar_json() {
                 ;;
             *) json_data+="\"command\": \"N/A\"}" ;;
         esac
-        json_data+="},"
+        json_data+="}, \"raw_output_file\": \"$(echo $test_name | tr ' ' '_' | tr -d ':').txt\"},"
         [[ "$status" == *"✓"* ]] && ((success_count++)) || ((failure_count++))
     done
-    json_data="${json_data%,}]"
+    json_data="${json_data%,]}"
     json_data+="],\"statistics\": {\"total_tests\": ${#CHECKLIST[@]}, \"success_count\": $success_count, \"failure_count\": $failure_count, \"total_execution_time\": \"$(( $(date +%s) - START_TIME )) seconds\"}"
     json_data+="}"
     echo "$json_data" | jq '.' > "$JSON_FILE"
     print_status "success" "Resultados salvos em $JSON_FILE"
 }
 
-#------------#------------# TEST FUNCTIONS #------------#------------#
+#------------#------------# FUNÇÕES DE TESTE #------------#------------#
 test_ping() {
     local ip="$1" version="$2"
     local ping_cmd="ping -c 4 $ip" && [ "$version" = "IPv6" ] && ping_cmd="ping6 -c 4 $ip"
@@ -522,7 +534,7 @@ Ativo_complexo() {
         salvar_json
     fi
 
-    for tool in "AutoRecon" "XRay"; do
+    for tool in "AutoRecon" "XRay" "Firewalk" "Clusterd"; do
         read -p "Deseja executar $tool para $TARGET? (s/n): " ASK
         if [ "$ASK" = "s" ] || [ "$ASK" = "S" ]; then
             case $tool in
@@ -569,6 +581,49 @@ Ativo_complexo() {
                         wait $pid 2>/dev/null
                     else
                         CHECKLIST+=("XRay: ✗ Portas HTTP/HTTPS não abertas")
+                    fi
+                    ;;
+                "Firewalk")
+                    if ! command -v firewalk &>/dev/null; then
+                        CHECKLIST+=("Firewalk: ✗ Não instalado")
+                    else
+                        loading_clock "Firewalk (Mapeamento de Firewall)" 15 &
+                        pid=$!
+                        local fw_output=$(mktemp)
+                        local fw_cmd=""
+                        if [ -n "$TARGET_IPv4" ]; then
+                            fw_cmd=$(echo "$FW_COMMAND" | sed "s/{TARGET_IP}/$TARGET_IPv4/g")
+                        elif [ -n "$TARGET_IPv6" ]; then
+                            fw_cmd=$(echo "$FW_COMMAND" | sed "s/{TARGET_IP}/$TARGET_IPv6/g")
+                        fi
+                        if $fw_cmd &>/dev/null; then
+                            local fw_results=$(wc -l < "$fw_output")
+                            [ "$fw_results" -gt 0 ] && CHECKLIST+=("Firewalk: ✓ $fw_results regras de firewall mapeadas") || CHECKLIST+=("Firewalk: ✓ Nenhuma regra encontrada")
+                        else
+                            CHECKLIST+=("Firewalk: ✗ Falha")
+                        fi
+                        rm -f "$fw_output"
+                        kill $pid
+                        wait $pid 2>/dev/null
+                    fi
+                    ;;
+                "Clusterd")
+                    if ! python3 -m pip show clusterd &>/dev/null; then
+                        CHECKLIST+=("Clusterd: ✗ Não instalado")
+                    else
+                        loading_clock "Clusterd (Exploração de Servidores)" 15 &
+                        pid=$!
+                        local cl_output=$(mktemp)
+                        local cl_cmd=$(echo "$CL_COMMAND" | sed "s/{TARGET}/$TARGET/g")
+                        if $cl_cmd &>/dev/null; then
+                            local cl_results=$(wc -l < "$cl_output")
+                            [ "$cl_results" -gt 0 ] && CHECKLIST+=("Clusterd: ✓ $cl_results resultados encontrados") || CHECKLIST+=("Clusterd: ✓ Nenhum resultado encontrado")
+                        else
+                            CHECKLIST+=("Clusterd: ✗ Falha")
+                        fi
+                        rm -f "$cl_output"
+                        kill $pid
+                        wait $pid 2>/dev/null
                     fi
                     ;;
             esac
@@ -715,5 +770,5 @@ menu_inicial() {
     done
 }
 
-# Start the script
+# Inicia o script
 menu_inicial
