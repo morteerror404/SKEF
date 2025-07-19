@@ -111,32 +111,176 @@ verificar_tipo_alvo() {
     return 1
 }
 
+#!/bin/bash
+
+# Função para salvar resultados em JSON com mais detalhes
 salvar_json() {
+    local start_time=$(date +%s)  # Captura o tempo inicial para estatísticas
     local json_data="{"
-    json_data+="\"target\":\"$TARGET\","
-    json_data+="\"resolved_ip\":\"$TARGET_IP\","
-    json_data+="\"timestamp\":\"$(date +"%Y-%m-%dT%H:%M:%S")\","
-    json_data+="\"tests\":["
     
+    # Metadados do script
+    json_data+="\"script\": {"
+    json_data+="\"name\": \"Network Recon Script\","
+    json_data+="\"version\": \"1.0.0\","
+    json_data+="\"os\": \"$(uname -a)\","
+    json_data+="\"start_time\": \"$(date -d @$start_time '+%Y-%m-%dT%H:%M:%S')\","
+    json_data+="\"user\": \"$(whoami)\""
+    json_data+="},"
+
+    # Informações do alvo
+    json articula="\"target\": {"
+    json_data+="\"input\": \"$TARGET\","
+    json_data+="\"resolved_ip\": \"$TARGET_IP\","
+    json_data+="\"type\": \"$TYPE_TARGET\","
+    json_data+="\"protocol\": \"$(nc -zv -w 2 \"$TARGET_IP\" 443 &>/dev/null && echo 'https' || echo 'http')\","
+    json_data+="\"resolution_time\": \"$(date +'%Y-%m-%dT%H:%M:%S')\""
+    json_data+="},"
+
+    # Configurações das ferramentas
+    json_data+="\"tools_config\": {"
+    json_data+="\"nmap\": {"
+    json_data+="\"commands\": [\"$NMAP1\", \"$NMAP2\", \"$NMAP3\"],"
+    json_data+="\"silence\": \"$NMAP_SILENCE\""
+    json_data+="},"
+    json_data+="\"ffuf\": {"
+    json_data+="\"subdomain_commands\": [\"$FFUF1\", \"$FFUF2\", \"$FFUF3\"],"
+    json_data+="\"web_commands\": [\"$FFUF_WEB1\", \"$FFUF_WEB2\", \"$FFUF_WEB3\"],"
+    json_data+="\"wordlists_dir\": \"$WORDLISTS_DIR\""
+    json_data+="},"
+    json_data+="\"attacksurfacemapper\": [\"$ASM1\", \"$ASM2\", \"$ASM3\"],"
+    json_data+="\"autorecon\": [\"$AR1\", \"$AR2\", \"$AR3\"],"
+    json_data+="\"gitleaks\": \"$GL1\","
+    json_data+="\"sherlock\": \"$SH1\","
+    json_data+="\"xray\": \"$XRAY1\","
+    json_data+=" \"fierce\": \"$FIERCE1\","
+    json_data+="\"finalrecon\": \"$FR1\","
+    json_data+="\"firewalk\": \"$FW1\","
+    json_data+="\"clusterd\": \"$CL1\""
+    json_data+="},"
+
+    # Dependências verificadas
+    json_data+="\"dependencies\": {"
+    json_data+="\"jq\": \"$(command -v jq &>/dev/null && jq --version || echo 'Não instalado')\","
+    json_data+="\"nmap\": \"$(command -v nmap &>/dev/null && nmap --version | head -1 || echo 'Não instalado')\","
+    json_data+="\"ffuf\": \"$(command -v ffuf &>/dev/null && ffuf --version || echo 'Não instalado')\","
+    json_data+="\"python3\": \"$(command -v python3 &>/dev/null && python3 --version || echo 'Não instalado')\","
+    json_data+="\"attacksurfacemapper\": \"$(python3 -m pip show attacksurfacemapper &>/dev/null && echo 'Instalado' || echo 'Não instalado')\","
+    json_data+="\"autorecon\": \"$(command -v autorecon &>/dev/null && autorecon --version || echo 'Não instalado')\","
+    json_data+="\"gitleaks\": \"$(command -v gitleaks &>/dev/null && gitleaks --version || echo 'Não instalado')\","
+    json_data+="\"sherlock\": \"$(python3 -m pip show sherlock-project &>/dev/null && echo 'Instalado' || echo 'Não instalado')\","
+    json_data+="\"xray\": \"$(command -v xray &>/dev/null && xray --version || echo 'Não instalado')\","
+    json_data+="\"fierce\": \"$(command -v fierce &>/dev/null && fierce --version || echo 'Não instalado')\","
+    json_data+="\"finalrecon\": \"$(python3 -m pip show finalrecon &>/dev/null && echo 'Instalado' || echo 'Não instalado')\","
+    json_data+="\"firewalk\": \"$(command -v firewalk &>/dev/null && firewalk --version || echo 'Não instalado')\","
+    json_data+="\"clusterd\": \"$(python3 -m pip show clusterd &>/dev/null && echo 'Instalado' || echo 'Não instalado')\""
+    json_data+="},"
+
+    # Resultados dos testes
+    json_data+="\"tests\": ["
+    local success_count=0
+    local failure_count=0
     for item in "${CHECKLIST[@]}"; do
         IFS=':' read -ra parts <<< "$item"
         test_name=$(echo "${parts[0]}" | xargs)
         status=$(echo "${parts[1]}" | xargs)
+        message=$(echo "${parts[1]}" | cut -d' ' -f2- | xargs)
+
+        json_data+="{\"name\": \"$test_name\","
+        json_data+="\"status\": $([[ "$status" == *"✓"* ]] && echo "true" || echo "false"),"
+        json_data+="\"message\": \"$message\","
+        json_data+="\"timestamp\": \"$(date +'%Y-%m-%dT%H:%M:%S')\","
+        json_data+="\"details\": {"
         
-        json_data+="{\"name\":\"$test_name\","
-        
-        if [[ "$status" == *"✓"* ]]; then
-            json_data+="\"status\":true,"
-            json_data+="\"message\":\"${status#*✓}\""
-        else
-            json_data+="\"status\":false,"
-            json_data+="\"message\":\"${status#*✗}\""
-        fi
-        
+        # Adiciona detalhes específicos para cada tipo de teste
+        case $test_name in
+            "Ping"|"Ping Personalizado")
+                json_data+="\"command\": \"ping -c 4 $TARGET_IP\","
+                json_data+="\"packet_loss\": \"$(echo "$ping_result" | grep -oP '\d+(?=% packet loss)' || echo 'N/A')\","
+                json_data+="\"avg_latency\": \"$(echo "$ping_result" | grep -oPm1 '[\d.]+(?=\s*ms$)' | tail -1 || echo 'N/A')\""
+                ;;
+            "DNS"|"DNS Personalizado")
+                json_data+="\"command\": \"dig $TARGET +short\","
+                json_data+="\"resolved_ips\": \"$(echo "$dns_result" | grep -oP '(\d+\.){3}\d+' | tr '\n' ',' | sed 's/,$//' || echo 'N/A')\""
+                ;;
+            "Porta "*)
+                json_data+="\"port\": \"$(echo $test_name | grep -oP '\d+')\","
+                json_data+="\"command\": \"nc -zv -w 2 $TARGET_IP $(echo $test_name | grep -oP '\d+')\""
+                ;;
+            "Nmap Avançado")
+                json_data+="\"command\": \"$nmap_cmd\","
+                json_data+="\"open_ports\": \"$(grep -oP 'portid=\"\d+\"' "$nmap_output" 2>/dev/null | cut -d'\"' -f2 | tr '\n' ',' | sed 's/,$//' || echo 'N/A')\""
+                ;;
+            "FFuf Subdomínios")
+                json_data+="\"command\": \"$ffuf_cmd\","
+                json_data+="\"subdomains\": \"$(awk -F',' 'NR>1 {print $2}' "$ffuf_output" 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo 'N/A')\""
+                ;;
+            "FFuf Web")
+                json_data+="\"command\": \"$ffuf_cmd\","
+                json_data+="\"directories\": \"$(awk -F',' 'NR>1 {print $2}' "$ffuf_output" 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo 'N/A')\""
+                ;;
+            "AttackSurfaceMapper")
+                json_data+="\"command\": \"$asm_cmd\","
+                json_data+="\"subdomains\": \"$(grep -oP 'Found \d+ subdomains' "$asm_output" 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo 'N/A')\""
+                ;;
+            "Gitleaks")
+                json_data+="\"command\": \"$gl_cmd\","
+                json_data+="\"leaks_count\": \"$(jq '. | length' "$gl_output" 2>/dev/null || echo 'N/A')\""
+                ;;
+            "Sherlock")
+                json_data+="\"command\": \"$sh_cmd\","
+                json_data+="\"profiles_count\": \"$(wc -l < "$sh_output" 2>/dev/null || echo 'N/A')\""
+                ;;
+            "Fierce")
+                json_data+="\"command\": \"$fierce_cmd\","
+                json_data+="\"subdomains_count\": \"$(grep -oP 'Found:.*$' "$fierce_output" 2>/dev/null | wc -l || echo 'N/A')\""
+                ;;
+            "FinalRecon")
+                json_data+="\"command\": \"$fr_cmd\","
+                json_data+="\"results_count\": \"$(wc -l < "$fr_output" 2>/dev/null || echo 'N/A')\""
+                ;;
+            "Firewalk")
+                json_data+="\"command\": \"$fw_cmd\","
+                json_data+="\"rules_count\": \"$(wc -l < "$fw_output" 2>/dev/null || echo 'N/A')\""
+                ;;
+            "Clusterd")
+                json_data+="\"command\": \"$cl_cmd\","
+                json_data+="\"results_count\": \"$(wc -l < "$cl_output" 2>/dev/null || echo 'N/A')\""
+                ;;
+            "AutoRecon")
+                json_data+="\"command\": \"$ar_cmd\","
+                json_data+="\"files_count\": \"$(find "$autorecon_output_dir" -type f 2>/dev/null | wc -l || echo 'N/A')\""
+                ;;
+            "XRay")
+                json_data+="\"command\": \"$xray_cmd\","
+                json_data+="\"vulnerabilities_count\": \"$(jq '. | length' "$xray_output" 2>/dev/null || echo 'N/A')\""
+                ;;
+            "HTTP"*)
+                json_data+="\"command\": \"curl -sI $protocol://$TARGET\","
+                json_data+="\"http_code\": \"$http_code\""
+                ;;
+            "WHOIS"|"WHOIS Personalizado")
+                json_data+="\"command\": \"whois $TARGET\""
+                ;;
+            *) json_data+="\"command\": \"N/A\"" ;;
+        esac
         json_data+="},"
+
+        # Contagem de sucessos e falhas
+        [[ "$status" == *"✓"* ]] && ((success_count++)) || ((failure_count++))
+        json_data+="\"raw_output_file\": \"$(echo $test_name | tr ' ' '_' | tr -d ':').txt\"}," # Indica arquivo de saída bruta, se aplicável
     done
-    
-    json_data="${json_data%,}]}"
+    json_data="${json_data%,]}" # Remove a última vírgula
+
+    # Estatísticas gerais
+    json_data+="],"
+    json_data+="\"statistics\": {"
+    json_data+="\"total_tests\": ${#CHECKLIST[@]},"
+    json_data+="\"success_count\": $success_count,"
+    json_data+="\"failure_count\": $failure_count,"
+    json_data+="\"total_execution_time\": \"$(( $(date +%s) - start_time )) seconds\""
+    json_data+="}"
+
+    json_data+="}"
     echo "$json_data" | jq '.' > "$JSON_FILE"
 }
 
