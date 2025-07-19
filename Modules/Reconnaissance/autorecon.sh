@@ -289,20 +289,20 @@ print_clock_frame() {
     local task=$2
     local hora=$(date +"%H:%M:%S")
 
-    echo -e "\n   _____"
-    echo " /_______\\"
+    echo -e "\n   ______"
+    echo " /________\\"
     echo " |$hora|"
-    echo " |_______|"
+    echo " |________|"
 
     if [ "$frame" -eq 1 ]; then
-        echo " |.......|"
-        echo " |.......|"
+        echo " |........|"
+        echo " |........|"
     else
-        echo " |       |"
-        echo " |       |"
+        echo " |        |"
+        echo " |        |"
     fi
 
-    echo " \\ _____ /"
+    echo " \\ ______ /"
     echo -e "\nExecutando: $task"
 
     echo -e "\nChecklist:"
