@@ -54,31 +54,31 @@ valida_resposta_simples() {
 
 detect_package_manager() {
     if command -v apt &> /dev/null; then
-        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mapt\033[0m"        # Debian/Ubuntu
+        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mapt\033[0m"
         CMD_PACK_MANAGER_INSTALL="sudo apt install -y"
         CMD_PACK_MANAGER_NAME="apt"
         CONFIG_DIR="/etc/apt"
         return 0
     elif command -v pacman &> /dev/null; then
-        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mpacman\033[0m"     # Arch
+        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mpacman\033[0m"
         CMD_PACK_MANAGER_INSTALL="sudo pacman -S --noconfirm"
         CMD_PACK_MANAGER_NAME="pacman"
         CONFIG_DIR="/etc/pacman.d"
         return 0
     elif command -v dnf &> /dev/null; then
-        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mdnf\033[0m"        # Fedora
+        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mdnf\033[0m"
         CMD_PACK_MANAGER_INSTALL="sudo dnf install -y"
         CMD_PACK_MANAGER_NAME="dnf"
         CONFIG_DIR="/etc/yum"
         return 0
     elif command -v yum &> /dev/null; then
-        echo -e "Encontramos seu Gerenciador! Você usa o \033[32myum\033[0m"        # RHEL/CentOS
+        echo -e "Encontramos seu Gerenciador! Você usa o \033[32myum\033[0m"
         CMD_PACK_MANAGER_INSTALL="sudo yum install -y"
         CMD_PACK_MANAGER_NAME="yum"
         CONFIG_DIR="/etc/yum"
         return 0
     elif command -v zypper &> /dev/null; then
-        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mzypper\033[0m"     # openSUSE
+        echo -e "Encontramos seu Gerenciador! Você usa o \033[32mzypper\033[0m"
         CMD_PACK_MANAGER_INSTALL="sudo zypper install -y"
         CMD_PACK_MANAGER_NAME="zypper"
         CONFIG_DIR="/etc/zypp"
@@ -409,6 +409,7 @@ setup_wordlists() {
         if [[ "$repo" == "SecLists" && -f "${repo_dir}/Discovery/Web-Content/raft-large-directories.txt" ]]; then
             ln -sf "${repo_dir}/Discovery/Web-Content/raft-large-directories.txt" "${wordlists_dir}/web_directories.txt" 2>/dev/null
             ln -sf "${repo_dir}/Passwords/Common-Credentials/top-20-common-SSH-passwords.txt" "${wordlists_dir}/ssh_passwords.txt" 2>/dev/null
+            ln -sf "${repo_dir}/Discovery/DNS/subdomains-top1million-5000.txt" "${wordlists_dir}/subdomains.txt" 2>/dev/null
         fi
     done
     
@@ -435,6 +436,101 @@ CONFIG_DIR=""
 resposta_discritiva=""
 resposta=""
 pergunta=""
+
+#------------#------------# INSTALAÇÃO DE FERRAMENTAS #------------#------------#
+
+install_tools() {
+    local timestamp=$(date +%Y%m%d_%H%M%S)
+    local log_file="$HOME/install_tools_${timestamp}.log"
+    local tools=(
+        "nmap:package"
+        "ffuf:go:github.com/ffuf/ffuf/v2@latest"
+        "attacksurfacemapper:pip:attacksurfacemapper"
+        "autorecon:pip:autorecon"
+        "gitleaks:go:github.com/zricethezav/gitleaks/v8@latest"
+        "sherlock:pip:sherlock-project"
+        "xray:manual:https://github.com/evilsocket/xray/releases"
+        "fierce:pip:fierce"
+        "finalrecon:pip:finalrecon"
+        "firewalk:manual:https://github.com/0x90/firewalk"
+        "clusterd:pip:clusterd"
+    )
+
+    echo -e "\033[34m[+] Instalando ferramentas de segurança...\033[0m" | tee -a "$log_file"
+
+    for tool in "${tools[@]}"; do
+        IFS=':' read -r tool_name install_method install_source <<< "$tool"
+        echo -e "\n\033[36mProcessando $tool_name...\033[0m" | tee -a "$log_file"
+
+        # Verifica se a ferramenta está instalada
+        if [ "$install_method" = "pip" ]; then
+            if python3 -m pip show "$tool_name" &>/dev/null; then
+                echo -e "\033[33m[!] $tool_name já está instalado.\033[0m" | tee -a "$log_file"
+                continue
+            fi
+        elif [ "$tool_name" = "gitleaks" ] || [ "$tool_name" = "ffuf" ]; then
+            if command -v "$tool_name" &>/dev/null; then
+                echo -e "\033[33m[!] $tool_name já está instalado.\033[0m" | tee -a "$log_file"
+                continue
+            fi
+        elif [ "$tool_name" = "xray" ] || [ "$tool_name" = "firewalk" ]; then
+            if command -v "$tool_name" &>/dev/null; then
+                echo -e "\033[33m[!] $tool_name já está instalado.\033[0m" | tee -a "$log_file"
+                continue
+            fi
+        else
+            if command -v "$tool_name" &>/dev/null; then
+                echo -e "\033[33m[!] $tool_name já está instalado.\033[0m" | tee -a "$log_file"
+                continue
+            fi
+        fi
+
+        # Instala a ferramenta
+        case $install_method in
+            package)
+                echo -e "\033[34mTentando instalar $tool_name com $CMD_PACK_MANAGER_INSTALL...\033[0m" | tee -a "$log_file"
+                ( $CMD_PACK_MANAGER_INSTALL "$tool_name" &>> "$log_file" ) &
+                loading_animation $! "Instalando $tool_name"
+                if command -v "$tool_name" &>/dev/null; then
+                    echo -e "\033[32m[√] $tool_name instalado com sucesso!\033[0m" | tee -a "$log_file"
+                else
+                    echo -e "\033[31m[!] Falha ao instalar $tool_name com $CMD_PACK_MANAGER_NAME.\033[0m" | tee -a "$log_file"
+                fi
+                ;;
+            pip)
+                echo -e "\033[34mTentando instalar $tool_name com pip3...\033[0m" | tee -a "$log_file"
+                ( python3 -m pip install "$install_source" &>> "$log_file" ) &
+                loading_animation $! "Instalando $tool_name"
+                if python3 -m pip show "$tool_name" &>/dev/null; then
+                    echo -e "\033[32m[√] $tool_name instalado com sucesso!\033[0m" | tee -a "$log_file"
+                else
+                    echo -e "\033[31m[!] Falha ao instalar $tool_name com pip.\033[0m" | tee -a "$log_file"
+                fi
+                ;;
+            go)
+                echo -e "\033[34mTentando instalar $tool_name com go install...\033[0m" | tee -a "$log_file"
+                if ! command -v go &>/dev/null; then
+                    echo -e "\033[34mGo não está instalado. Tentando instalar com $CMD_PACK_MANAGER_INSTALL...\033[0m" | tee -a "$log_file"
+                    ( $CMD_PACK_MANAGER_INSTALL go &>> "$log_file" ) &
+                    loading_animation $! "Instalando Go"
+                fi
+                ( go install "$install_source" &>> "$log_file" ) &
+                loading_animation $! "Instalando $tool_name"
+                if command -v "$tool_name" &>/dev/null; then
+                    echo -e "\033[32m[√] $tool_name instalado com sucesso!\033[0m" | tee -a "$log_file"
+                else
+                    echo -e "\033[31m[!] Falha ao instalar $tool_name com go install.\033[0m" | tee -a "$log_file"
+                fi
+                ;;
+            manual)
+                echo -e "\033[33m[!] $tool_name requer instalação manual. Visite: $install_source\033[0m" | tee -a "$log_file"
+                ;;
+        esac
+    done
+
+    echo -e "\n\033[32m[+] Instalação de ferramentas concluída!\033[0m" | tee -a "$log_file"
+    echo -e "Arquivo de log: \033[35m$log_file\033[0m"
+}
 
 #------------#------------# FUNÇÃO PRINCIPAL #------------#------------#
 
@@ -463,6 +559,12 @@ main() {
         loading_animation $! "Aguarde enquanto configuramos as wordlists"
         
         setup_wordlists
+        
+        # Instala ferramentas
+        (sleep 3) &
+        loading_animation $! "Aguarde enquanto instalamos as ferramentas"
+        
+        install_tools
     else
         echo -e "\n\033[33mNenhum gerenciador de pacotes foi configurado.\033[0m"
     fi
