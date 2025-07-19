@@ -12,6 +12,27 @@ WORDLISTS_DIR="$HOME/wordlists"
 NMAP_SILENCE=""
 START_TIME=$(date +%s)
 
+# Definir cores ANSI
+if [ "$(tput colors)" -ge 8 ]; then
+    BLUE="\033[1;34m"
+    CYAN="\033[1;36m"
+    GREEN="\033[1;32m"
+    YELLOW="\033[1;33m"
+    PURPLE="\033[1;35m"
+    WHITE="\033[1;37m"
+    RED="\033[1;31m"
+    NC="\033[0m"
+else
+    BLUE=""
+    CYAN=""
+    GREEN=""
+    YELLOW=""
+    PURPLE=""
+    WHITE=""
+    RED=""
+    NC=""
+fi
+
 # Arrays associativos para rastrear estados das portas
 declare -A PORT_STATUS_IPV4
 declare -A PORT_STATUS_IPV6
@@ -76,27 +97,6 @@ print_status() {
     esac
 }
 
-# Definir cores ANSI
-if [ "$(tput colors)" -ge 8 ]; then
-    BLUE="\033[1;34m"
-    CYAN="\033[1;36m"
-    GREEN="\033[1;32m"
-    YELLOW="\033[1;33m"
-    PURPLE="\033[1;35m"
-    WHITE="\033[1;37m"
-    RED="\033[1;31m"
-    NC="\033[0m"
-else
-    BLUE=""
-    CYAN=""
-    GREEN=""
-    YELLOW=""
-    PURPLE=""
-    WHITE=""
-    RED=""
-    NC=""
-fi
-
 print_clock_frame() {
     local frame=$1 task=$2 hora=$(date +"%H:%M:%S")
     clear
@@ -106,36 +106,24 @@ print_clock_frame() {
     [ -n "$TARGET_IPv4" ] && echo -e "${GREEN}IPv4: $TARGET_IPv4${NC}"
     [ -n "$TARGET_IPv6" ] && echo -e "${GREEN}IPv6: $TARGET_IPv6${NC}"
     
-    # Animated clock with RECON on the right, adjusted for terminal width
-    local cols=$(tput cols)
-    local spacing=$((cols - 40 > 0 ? cols - 40 : 0))
-    printf "%-${spacing}s" " "
-    echo -e "\n   ${PURPLE}______${NC}       ${RED}██████╗ ${GREEN}███████╗${YELLOW} ██████╗${BLUE} ██████╗ ${PURPLE} ███╗   ██╗${NC}"
-    printf "%-${spacing}s" " "
-    echo -e " ${PURPLE}/${YELLOW}________${PURPLE}\\${NC}     ${RED}██╔══██╗${GREEN}██╔════╝${YELLOW}██╔════╝${BLUE}██╔═══██╗${PURPLE} ████╗  ██║${NC}"
-    printf "%-${spacing}s" " "
-    echo -e " ${PURPLE}|${CYAN}$hora${PURPLE}|${NC}    ${RED}██████╔╝${GREEN}█████╗  ${YELLOW}██║     ${BLUE}██║   ██║${PURPLE} ██╔██╗ ██║${NC}"
-    printf "%-${spacing}s" " "
-    echo -e " ${PURPLE}|${YELLOW}________${PURPLE}|${NC}    ${RED}██╔══██╗${GREEN}██╔══╝  ${YELLOW}██║     ${BLUE}██║   ██║${PURPLE} ██║╚██╗██║${NC}"
+    # Animated clock
+    echo -e "\n   ${PURPLE}______${NC}"
+    echo -e " ${PURPLE}/${YELLOW}________${PURPLE}\\${NC}"
+    echo -e " ${PURPLE}|${CYAN}$hora${PURPLE}|${NC}"
+    echo -e " ${PURPLE}|${YELLOW}________${PURPLE}|${NC}"
     if [ "$frame" -eq 1 ]; then
-        printf "%-${spacing}s" " "
-        echo -e " ${PURPLE}|${YELLOW}........${PURPLE}|${NC}    ${RED}██║  ██║${GREEN}███████╗${YELLOW}╚██████╗${BLUE}╚██████╔╝${PURPLE} ██║ ╚████║${NC}"
-        printf "%-${spacing}s" " "
-        echo -e " ${PURPLE}|${YELLOW}........${PURPLE}|${NC}    ${RED}╚═╝  ╚═╝${GREEN}╚══════╝${YELLOW} ╚═════╝${BLUE} ╚═════╝ ${PURPLE} ╚═╝  ╚═══╝${NC}"
+        echo -e " ${PURPLE}|${YELLOW}........${PURPLE}|${NC}"
+        echo -e " ${PURPLE}|${YELLOW}........${PURPLE}|${NC}"
     else
-        printf "%-${spacing}s" " "
-        echo -e " ${PURPLE}|${YELLOW}        ${PURPLE}|${NC}    ${RED}██║  ██║${GREEN}███████╗${YELLOW}╚██████╗${BLUE}╚██████╔╝${PURPLE} ██║ ╚████║${NC}"
-        printf "%-${spacing}s" " "
-        echo -e " ${PURPLE}|${YELLOW}        ${PURPLE}|${NC}    ${RED}╚═╝  ╚═╝${GREEN}╚══════╝${YELLOW} ╚═════╝${BLUE} ╚═════╝ ${PURPLE} ╚═╝  ╚═══╝${NC}"
+        echo -e " ${PURPLE}|${YELLOW}        ${PURPLE}|${NC}"
+        echo -e " ${PURPLE}|${YELLOW}        ${PURPLE}|${NC}"
     fi
-    printf "%-${spacing}s" " "
     echo -e " ${PURPLE}\\ ${YELLOW}______${PURPLE} /${NC}"
     
     # Current task and checklist
     echo -e "\n${WHITE}Executando: ${CYAN}$task${NC}"
     echo -e "\n${GREEN}Checklist:${NC}"
     for item in "${CHECKLIST[@]}"; do
-        # Sanitizar item para evitar caracteres de controle
         item_sanitized=$(echo "$item" | sed 's/[^[:print:]]//g')
         if [[ "$item_sanitized" == *"✓"* ]]; then
             echo -e " ${GREEN}✔ $item_sanitized${NC}"
@@ -156,7 +144,7 @@ loading_clock() {
     while [ $SECONDS -lt $end_time ]; do
         print_clock_frame 1 "$task" &
         pid=$!
-        sleep 0.3  # Ajustado para animação mais fluida
+        sleep 0.3
         kill -0 $pid 2>/dev/null && kill $pid
         wait $pid 2>/dev/null
         print_clock_frame 2 "$task" &
@@ -198,10 +186,10 @@ substituir_variaveis() {
 
 salvar_json() {
     local json_data="{"
-    json_data+="\"script\": {\"name\": \"Network Recon Script\", \"version\": \"1.2.3\", \"os\": \"$(uname -a | tr -d '\n' | sed 's/[^[:print:]]//g')\", \"start_time\": \"$(date -d @$START_TIME '+%Y-%m-%dT%H:%M:%S')\", \"user\": \"$(whoami | tr -d '\n' | sed 's/[^[:print:]]//g')\"},"
+    json_data+="\"script\": {\"name\": \"Network Recon Script\", \"version\": \"1.2.4\", \"os\": \"$(uname -a | tr -d '\n' | sed 's/[^[:print:]]//g')\", \"start_time\": \"$(date -d @$START_TIME '+%Y-%m-%dT%H:%M:%S')\", \"user\": \"$(whoami | tr -d '\n' | sed 's/[^[:print:]]//g')\"},"
     json_data+="\"target\": {\"input\": \"$TARGET\", \"resolved_ipv4\": \"$TARGET_IPv4\", \"resolved_ipv6\": \"$TARGET_IPv6\", \"type\": \"$TYPE_TARGET\", \"protocol\": \"$(determinar_protocolo)\", \"resolution_time\": \"$(date +'%Y-%m-%dT%H:%M:%S')\"},"
     json_data+="\"tools_config\": {\"nmap\": {\"ipv4_commands\": $(printf '%s\n' "${NMAP_COMMANDS_IPV4[@]}" | jq -R . | jq -s .), \"ipv6_commands\": $(printf '%s\n' "${NMAP_COMMANDS_IPV6[@]}" | jq -R . | jq -s .), \"silence\": \"$NMAP_SILENCE\"}, \"ffuf\": {\"subdomain_commands\": $(printf '%s\n' "${FFUF_COMMANDS[@]}" | jq -R . | jq -s .), \"web_commands\": $(printf '%s\n' "${FFUF_WEB_COMMANDS[@]}" | jq -R . | jq -s .)}, \"attacksurfacemapper\": $(printf '%s\n' "${ASM_COMMANDS[@]}" | jq -R . | jq -s .), \"autorecon\": $(printf '%s\n' "${AR_COMMANDS[@]}" | jq -R . | jq -s .), \"gitleaks\": \"$GL_COMMAND\", \"sherlock\": \"$SH_COMMAND\", \"xray\": \"$XRAY_COMMAND\", \"fierce\": \"$FIERCE_COMMAND\", \"finalrecon\": \"$FR_COMMAND\", \"firewalk\": \"$FW_COMMAND\", \"clusterd\": \"$CL_COMMAND\"},"
-    json_data+="\"dependencies\": {\"jq\": \"$(command -v jq &>/dev/null && jq --version | tr -d '\n' | sed 's/[^[:print:]]//g' || echo 'Não instalado')\", \"nmap\": \"$(command -v nmap &>/dev/null && nmap --version | head -1 | tr -d '\n' | sed 's/[^[:print:]]//g' || echo 'Não instalado')\", \"ffuf\": \"$(command -v ffuf &>/dev/null && ffuf --version | tr -d '\n' | sed 's/[^[:print:]]//g' || echo 'Não instalado')\", \"python3\": \"$(command -v python3 &>/dev/null && python3 --version | tr -d '\n' | sed 's/[^[:print:]]//g' || echo 'Não instalado')\", \"attacksurfacemapper\": \"$(python3 -m pip show attacksurfacemapper &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"autorecon\": \"$(command -v autorecon &>/dev/null && autorecon --version | tr -d '\n' | sed 's/[^[:print:]]//g' || echo 'Não instalado')\", \"gitleaks\": \"$(command -v gitleaks &>/dev/null && gitleaks --version | tr -d '\n' | sed 's/[^[:print:]]//g' || echo 'Não instalado')\", \"sherlock\": \"$(python3 -m pip show sherlock-project &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"xray\": \"$(command -v xray &>/dev/null && xray --version | tr -d '\n' | sed 's/[^[:print:]]//g' || echo 'Não instalado')\", \"fierce\": \"$(command -v fierce &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"finalrecon\": \"$(python3 -m pip show finalrecon &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"firewalk\": \"$(command -v firewalk &>/dev/null && firewalk --version | tr -d '\n' | sed 's/[^[:print:]]//g' || echo 'Não instalado')\", \"clusterd\": \"$(python3 -m pip show clusterd &>/dev/null && echo 'Instalado' || echo 'Não instalado')\"},"
+    json_data+="\"dependencies\": {\"jq\": \"$(command -v jq &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"nmap\": \"$(command -v nmap &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"ffuf\": \"$(command -v ffuf &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"python3\": \"$(command -v python3 &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"attacksurfacemapper\": \"$(python3 -m pip show attacksurfacemapper &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"autorecon\": \"$(command -v autorecon &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"gitleaks\": \"$(command -v gitleaks &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"sherlock\": \"$(python3 -m pip show sherlock-project &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"xray\": \"$(command -v xray &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"fierce\": \"$(command -v fierce &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"finalrecon\": \"$(python3 -m pip show finalrecon &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"firewalk\": \"$(command -v firewalk &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"clusterd\": \"$(python3 -m pip show clusterd &>/dev/null && echo 'Instalado' || echo 'Não instalado')\"},"
     json_data+="\"tests\": ["
     local success_count=0 failure_count=0
     for item in "${CHECKLIST[@]}"; do
@@ -232,7 +220,7 @@ salvar_json() {
     json_data="${json_data%,]}"
     json_data+="],\"statistics\": {\"total_tests\": ${#CHECKLIST[@]}, \"success_count\": $success_count, \"failure_count\": $failure_count, \"total_execution_time\": \"$(( $(date +%s) - START_TIME )) seconds\"}"
     json_data+="}"
-    echo "$json_data" | jq '.' > "$JSON_FILE" 2>/dev/null || { print_status "error" "Falha ao salvar JSON"; return 1; }
+    echo "$json_data" | jq '.' > "$JSON_FILE" 2>/dev/null || { print_status "error" "Falha ao salvar JSON (verifique se jq está instalado e se o JSON é válido)"; return 1; }
     print_status "success" "Resultados salvos em $JSON_FILE"
 }
 
@@ -258,13 +246,8 @@ definir_alvo() {
         [ -n "$TARGET_IPv4" ] && CHECKLIST+=("Resolução IPv4: ✓ $TARGET_IPv4")
         [ -n "$TARGET_IPv6" ] && CHECKLIST+=("Resolução IPv6: ✓ $TARGET_IPv6")
     else
-        if [[ $TARGET =~ : ]]; then
-            TARGET_IPv6="$TARGET"
-            CHECKLIST+=("Alvo definido: ✓ $TARGET (IPv6)")
-        else
-            TARGET_IPv4="$TARGET"
-            CHECKLIST+=("Alvo definido: ✓ $TARGET (IPv4)")
-        fi
+        TARGET_IPv4="$TARGET"
+        CHECKLIST+=("Alvo definido: ✓ $TARGET (IPv4)")
     fi
     salvar_json
 }
@@ -273,6 +256,8 @@ test_ping() {
     local ip="$1" version="$2"
     local ping_cmd="ping -c 4 $ip" && [ "$version" = "IPv6" ] && ping_cmd="ping6 -c 4 $ip"
     print_status "action" "Testando PING $version"
+    loading_clock "Testando PING $version" 3 &
+    pid=$!
     local ping_result=$($ping_cmd 2>&1)
     if [ $? -eq 0 ]; then
         packet_loss=$(echo "$ping_result" | grep -oP '\d+(?=% packet loss)')
@@ -281,18 +266,26 @@ test_ping() {
     else
         CHECKLIST+=("Ping $version: ✗ Falha")
     fi
+    kill -0 $pid 2>/dev/null && kill $pid
+    wait $pid 2>/dev/null
+    salvar_json
 }
 
 test_ports() {
     local ip="$1" version="$2" ports=("${@:3}")
     for port in "${ports[@]}"; do
         print_status "action" "Testando Porta $port ($version)"
+        loading_clock "Testando Porta $port ($version)" 2 &
+        pid=$!
         if nc -zv -w 2 "$ip" $port &>/dev/null; then
             CHECKLIST+=("Porta $port ($version): ✓ Aberta")
         else
             CHECKLIST+=("Porta $port ($version): ✗ Fechada")
         fi
+        kill -0 $pid 2>/dev/null && kill $pid
+        wait $pid 2>/dev/null
     done
+    salvar_json
 }
 
 analyze_nmap_results() {
@@ -322,7 +315,6 @@ consolidar_portas() {
             esac
         done
         local total_tests=${port_tests[$port]}
-        local filtered_details="Testes: $total_tests, Abertas: $open_count, Fechadas: $closed_count, Filtradas: $filtered_count"
         if [ $open_count -eq $total_tests ]; then
             CHECKLIST+=("Porta $port ($ip_version): ✓ Aberta")
         elif [ $closed_count -eq $total_tests ]; then
@@ -366,13 +358,13 @@ Passivo_basico() {
     print_status "info" "Executando testes PASSIVOS BÁSICOS em $TARGET"
     loading_clock "Testes Passivos Básicos" 3 &
     pid=$!
-    if whois "$TARGET" &>/dev/null; then
+    if [ "$TYPE_TARGET" = "DOMAIN" ] && whois "$TARGET" &>/dev/null; then
         CHECKLIST+=("WHOIS: ✓ Informações obtidas")
     else
-        CHECKLIST+=("WHOIS: ✗ Falha")
+        CHECKLIST+=("WHOIS: ✗ Falha ou não aplicável")
     fi
-    CHECKLIST+=("DNS Histórico: ⚠ Simulado")
-    CHECKLIST+=("Threat Intel: ⚠ Simulado")
+    [ "$TYPE_TARGET" = "DOMAIN" ] && CHECKLIST+=("DNS Histórico: ⚠ Simulado")
+    [ "$TYPE_TARGET" = "DOMAIN" ] && CHECKLIST+=("Threat Intel: ⚠ Simulado")
     kill -0 $pid 2>/dev/null && kill $pid
     wait $pid 2>/dev/null
     salvar_json
@@ -416,19 +408,19 @@ Ativo_basico() {
     pid=$!
     [ -n "$TARGET_IPv4" ] && test_ping "$TARGET_IPv4" "IPv4"
     [ -n "$TARGET_IPv6" ] && test_ping "$TARGET_IPv6" "IPv6"
-    kill -0 $pid 2>/dev/null && kill $pid
-    wait $pid 2>/dev/null
-    loading_clock "Teste DNS" 3 &
-    pid=$!
-    local dns_result=$(dig "$TARGET" +short 2>&1)
-    if [ -n "$dns_result" ]; then
-        local ips=$(echo "$dns_result" | grep -oP '(\d+\.){3}\d+|[0-9a-fA-F:]+' | tr '\n' ',' | sed 's/,$//')
-        CHECKLIST+=("DNS: ✓ Resolvido (IPs: $ips)")
-    else
-        CHECKLIST+=("DNS: ✗ Falha")
-    fi
-    kill -0 $pid 2>/dev/null && kill $pid
-    wait $pid 2>/dev/null
+    [ "$TYPE_TARGET" = "DOMAIN" ] && {
+        loading_clock "Teste DNS" 3 &
+        pid=$!
+        local dns_result=$(dig "$TARGET" +short 2>&1)
+        if [ -n "$dns_result" ]; then
+            local ips=$(echo "$dns_result" | grep -oP '(\d+\.){3}\d+|[0-9a-fA-F:]+' | tr '\n' ',' | sed 's/,$//')
+            CHECKLIST+=("DNS: ✓ Resolvido (IPs: $ips)")
+        else
+            CHECKLIST+=("DNS: ✗ Falha")
+        fi
+        kill -0 $pid 2>/dev/null && kill $pid
+        wait $pid 2>/dev/null
+    }
     loading_clock "Teste de Portas" 5 &
     pid=$!
     [ -n "$TARGET_IPv4" ] && test_ports "$TARGET_IPv4" "IPv4" 22 80 443
@@ -550,40 +542,33 @@ menu_personalizado() {
             1)
                 [ -z "$TARGET" ] && definir_alvo
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                loading_clock "Teste de Ping" 3 &
-                pid=$!
                 [ -n "$TARGET_IPv4" ] && test_ping "$TARGET_IPv4" "IPv4"
                 [ -n "$TARGET_IPv6" ] && test_ping "$TARGET_IPv6" "IPv6"
-                kill -0 $pid 2>/dev/null && kill $pid
-                wait $pid 2>/dev/null
-                salvar_json
                 ;;
             2)
                 [ -z "$TARGET" ] && definir_alvo
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                loading_clock "Teste DNS" 3 &
-                pid=$!
-                if host "$TARGET" &>/dev/null; then
-                    CHECKLIST+=("DNS Personalizado: ✓ Resolvido")
-                else
-                    CHECKLIST+=("DNS Personalizado: ✗ Falha")
-                fi
-                kill -0 $pid 2>/dev/null && kill $pid
-                wait $pid 2>/dev/null
-                salvar_json
+                [ "$TYPE_TARGET" = "DOMAIN" ] && {
+                    loading_clock "Teste DNS" 3 &
+                    pid=$!
+                    local dns_result=$(dig "$TARGET" +short 2>&1)
+                    if [ -n "$dns_result" ]; then
+                        local ips=$(echo "$dns_result" | grep -oP '(\d+\.){3}\d+|[0-9a-fA-F:]+' | tr '\n' ',' | sed 's/,$//')
+                        CHECKLIST+=("DNS Personalizado: ✓ Resolvido (IPs: $ips)")
+                    else
+                        CHECKLIST+=("DNS Personalizado: ✗ Falha")
+                    fi
+                    kill -0 $pid 2>/dev/null && kill $pid
+                    wait $pid 2>/dev/null
+                }
                 ;;
             3)
                 [ -z "$TARGET" ] && definir_alvo
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
                 read -p "Digite as portas a testar (ex: 22,80,443): " PORTS
                 IFS=',' read -ra PORT_ARRAY <<< "$PORTS"
-                loading_clock "Teste de Portas" 5 &
-                pid=$!
                 [ -n "$TARGET_IPv4" ] && test_ports "$TARGET_IPv4" "IPv4" "${PORT_ARRAY[@]}"
                 [ -n "$TARGET_IPv6" ] && test_ports "$TARGET_IPv6" "IPv6" "${PORT_ARRAY[@]}"
-                kill -0 $pid 2>/dev/null && kill $pid
-                wait $pid 2>/dev/null
-                salvar_json
                 ;;
             4)
                 [ -z "$TARGET" ] && definir_alvo
@@ -600,25 +585,24 @@ menu_personalizado() {
                     fi
                     kill -0 $pid 2>/dev/null && kill $pid
                     wait $pid 2>/dev/null
-                    salvar_json
                 else
                     CHECKLIST+=("HTTP: ✗ Teste requer domínio")
-                    salvar_json
                 fi
                 ;;
             5)
                 [ -z "$TARGET" ] && definir_alvo
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                loading_clock "Teste WHOIS" 3 &
-                pid=$!
-                if whois "$TARGET" &>/dev/null; then
-                    CHECKLIST+=("WHOIS Personalizado: ✓ Informações obtidas")
-                else
-                    CHECKLIST+=("WHOIS Personalizado: ✗ Falha")
-                fi
-                kill -0 $pid 2>/dev/null && kill $pid
-                wait $pid 2>/dev/null
-                salvar_json
+                [ "$TYPE_TARGET" = "DOMAIN" ] && {
+                    loading_clock "Teste WHOIS" 3 &
+                    pid=$!
+                    if whois "$TARGET" &>/dev/null; then
+                        CHECKLIST+=("WHOIS Personalizado: ✓ Informações obtidas")
+                    else
+                        CHECKLIST+=("WHOIS Personalizado: ✗ Falha")
+                    fi
+                    kill -0 $pid 2>/dev/null && kill $pid
+                    wait $pid 2>/dev/null
+                }
                 ;;
             6)
                 [ -z "$TARGET" ] && definir_alvo
@@ -635,6 +619,7 @@ menu_personalizado() {
             8) break ;;
             *) print_status "error" "Opção inválida" ;;
         esac
+        salvar_json
     done
 }
 
