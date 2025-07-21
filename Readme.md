@@ -28,20 +28,32 @@ O SKEF é estruturado em etapas claras e concisas:
 
 ## 🛠️ Pré-requisitos
 
-
+1. OS baseado em linux.
+   
 ---
-
 ## 🚀 Instalação
+
 1. Clone o repositório:
    ```bash
    git clone https://github.com/morteerror404/SKEF
    cd SKEF
    ```
-2. Instale as dependências:
-   ```bash
-   pip install -r requirements.txt
-   ```
 
+
+2. instale tudo com o ``install.sh.``
+   
+```bash
+cd SKEF/Scripts/install.sh
+sudo chmod +x install.sh
+sudo ./install.sh
+```
+
+3. Opcional: Caso queira instalar os ``requirements.txt`` com ``pip``:
+
+```python
+git clone https://github.com/morteerror404/SKEF/blob/main/Scripts/requirements.txt
+sudo pip install -r requirements.txt
+```   ```
 ---
 
 ## 🏁 Uso Básico
@@ -70,7 +82,7 @@ SKEF/
 ---
 
 ## 📄 Documentação
-Detalhes avançados estão em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) e [docs/EXAMPLES.md](docs/EXAMPLES.md).
+Detalhes avançados estão em [docs/ARCHITECTURE.md](Arquitetura.md) e [docs/EXAMPLES.md](Exemplos.md).
 
 ---
 
