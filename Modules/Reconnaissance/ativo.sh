@@ -59,9 +59,9 @@ AR_COMMANDS=(
     "autorecon {TARGET_IP} --dir autorecon_output"
     "autorecon {TARGET_IP} --dir autorecon_output --web"
 )
-XRAY_COMMAND="xray ws --url {PROTOCOL}://{TARGET} --json-output xray_output.json"
+XRAY_COMMAND="xray ws -domain {TARGET} --json-output xray_output.json"
 FW_COMMAND="firewalk -S1-1024 -i eth0 -n {TARGET_IP} -o firewalk_output.txt"
-CL_COMMAND="python3 -m clusterd -t {TARGET} -o clusterd_output.txt"
+CL_COMMAND="./clusterd.py -t {TARGET} -o clusterd_output.txt"
 
 #------------#------------# FUNÇÕES AUXILIARES #------------#------------#
 validar_root() {
@@ -127,13 +127,13 @@ loading_clock() {
         print_clock_frame 1 "$task" &
         pid=$!
         sleep 0.3
-        kill -0 $pid 2>/dev/null && kill $pid
-        wait $pid 2>/dev/null
+        kill $pid 2>/dev/null || true
+        wait $pid 2>/dev/null || true
         print_clock_frame 2 "$task" &
         pid=$!
         sleep 0.3
-        kill -0 $pid 2>/dev/null && kill $pid
-        wait $pid 2>/dev/null
+        kill $pid 2>/dev/null || true
+        wait $pid 2>/dev/null || true
     done
 }
 
@@ -165,40 +165,124 @@ substituir_variaveis() {
 }
 
 salvar_json() {
-    local json_data="{"
-    json_data+="\"script\": {\"name\": \"Ativo Recon Script\", \"version\": \"1.0\", \"os\": \"$(uname -a | tr -d '\n' | sed 's/[^[:print:]]//g')\", \"start_time\": \"$(date -d @$START_TIME '+%Y-%m-%dT%H:%M:%S')\", \"user\": \"$(whoami | tr -d '\n' | sed 's/[^[:print:]]//g')\"},"
-    json_data+="\"target\": {\"input\": \"$TARGET\", \"resolved_ipv4\": \"$TARGET_IPv4\", \"resolved_ipv6\": \"$TARGET_IPv6\", \"type\": \"$TYPE_TARGET\", \"protocol\": \"$(determinar_protocolo)\", \"resolution_time\": \"$(date +'%Y-%m-%dT%H:%M:%S')\"},"
-    json_data+="\"tools_config\": {\"nmap\": {\"ipv4_commands\": $(printf '%s\n' "${NMAP_COMMANDS_IPV4[@]}" | jq -R . | jq -s .), \"ipv6_commands\": $(printf '%s\n' "${NMAP_COMMANDS_IPV6[@]}" | jq -R . | jq -s .), \"silence\": \"$NMAP_SILENCE\"}, \"ffuf\": {\"web_commands\": $(printf '%s\n' "${FFUF_WEB_COMMANDS[@]}" | jq -R . | jq -s .)}, \"autorecon\": $(printf '%s\n' "${AR_COMMANDS[@]}" | jq -R . | jq -s .), \"xray\": \"$XRAY_COMMAND\", \"firewalk\": \"$FW_COMMAND\", \"clusterd\": \"$CL_COMMAND\"},"
-    json_data+="\"dependencies\": {\"jq\": \"$(command -v jq &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"nmap\": \"$(command -v nmap &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"ffuf\": \"$(command -v ffuf &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"python3\": \"$(command -v python3 &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"autorecon\": \"$(command -v autorecon &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"xray\": \"$(command -v xray &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"firewalk\": \"$(command -v firewalk &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"clusterd\": \"$(python3 -m pip show clusterd &>/dev/null && echo 'Instalado' || echo 'Não instalado')\"},"
-    json_data+="\"tests\": ["
-    local success_count=0 failure_count=0
+    packet_loss="${packet_loss:-"N/A"}"
+    avg_latency="${avg_latency:-"N/A"}"
+    filtered_details="${filtered_details:-"N/A"}"
+    nmap_cmd="${nmap_cmd:-"N/A"}"
+    open_ports="${open_ports:-"N/A"}"
+
+    local json_base=$(cat <<EOF
+{
+  "script": {
+    "name": "Ativo Recon Script",
+    "version": "1.0",
+    "os": "$(uname -a | tr -d '\n' | sed 's/[^[:print:]]//g')",
+    "start_time": "$(date -d @$START_TIME '+%Y-%m-%dT%H:%M:%S')",
+    "user": "$(whoami | tr -d '\n' | sed 's/[^[:print:]]//g')"
+  },
+  "target": {
+    "input": "$TARGET",
+    "resolved_ipv4": "$TARGET_IPv4",
+    "resolved_ipv6": "$TARGET_IPv6",
+    "type": "$TYPE_TARGET",
+    "protocol": "$(determinar_protocolo)",
+    "resolution_time": "$(date +'%Y-%m-%dT%H:%M:%S')"
+  },
+  "tools_config": {
+    "nmap": {
+      "ipv4_commands": $(printf '%s\n' "${NMAP_COMMANDS_IPV4[@]}" | jq -R . | jq -s .),
+      "ipv6_commands": $(printf '%s\n' "${NMAP_COMMANDS_IPV6[@]}" | jq -R . | jq -s .),
+      "silence": "$NMAP_SILENCE"
+    },
+    "ffuf": {
+      "web_commands": $(printf '%s\n' "${FFUF_WEB_COMMANDS[@]}" | jq -R . | jq -s .)
+    },
+    "autorecon": $(printf '%s\n' "${AR_COMMANDS[@]}" | jq -R . | jq -s .),
+    "xray": "$XRAY_COMMAND",
+    "firewalk": "$FW_COMMAND",
+    "clusterd": "$CL_COMMAND"
+  },
+  "dependencies": {
+    "jq": "$(command -v jq &>/dev/null && echo 'Instalado' || echo 'Não instalado')",
+    "nmap": "$(command -v nmap &>/dev/null && echo 'Instalado' || echo 'Não instalado')",
+    "ffuf": "$(command -v ffuf &>/dev/null && echo 'Instalado' || echo 'Não instalado')",
+    "python3": "$(command -v python3 &>/dev/null && echo 'Instalado' || echo 'Não instalado')",
+    "autorecon": "$(command -v autorecon &>/dev/null && echo 'Instalado' || echo 'Não instalado')",
+    "xray": "$(command -v xray &>/dev/null && echo 'Instalado' || echo 'Não instalado')",
+    "firewalk": "$(command -v firewalk &>/dev/null && echo 'Instalado' || echo 'Não instalado')",
+    "clusterd": "$(python3 -m pip show clusterd &>/dev/null && echo 'Instalado' || echo 'Não instalado')"
+  },
+  "tests": [
+EOF
+)
+
+    local tests_array=""
+    local success_count=0
+    local failure_count=0
     for item in "${CHECKLIST[@]}"; do
-        item_sanitized=$(echo "$item" | sed 's/[^[:print:]]//g')
+        item_sanitized=$(echo "$item" | sed 's/[^[:alnum:]: %()+-]//g' | sed 's/:/\\\\:/g')
         IFS=':' read -ra parts <<< "$item_sanitized"
         test_name=$(echo "${parts[0]}" | xargs)
         status=$(echo "${parts[1]}" | xargs)
         message=$(echo "${parts[1]}" | cut -d' ' -f2- | xargs)
-        json_data+="{\"name\": \"$test_name\", \"status\": $([[ "$status" == *"✓"* ]] && echo "true" || echo "false"), \"message\": \"$message\", \"timestamp\": \"$(date +'%Y-%m-%dT%H:%M:%S')\", \"details\": {"
+
+        local status_bool=$( [[ "$status" == *"✓"* ]] && echo "true" || echo "false" )
+        [[ "$status" == *"✓"* ]] && ((success_count++)) || ((failure_count++))
+
+        tests_array+=$(cat <<EOF
+    {
+      "name": "$test_name",
+      "status": $status_bool,
+      "message": "$message",
+      "timestamp": "$(date +'%Y-%m-%dT%H:%M:%S')",
+      "details": {
+EOF
+)
         case $test_name in
             "Ping"|"Ping Personalizado")
-                json_data+="\"command\": \"ping -c 4 $TARGET_IPv4\", \"packet_loss\": \"${packet_loss:-N/A}\", \"avg_latency\": \"${avg_latency:-N/A}\", \"ipv6_command\": \"ping6 -c 4 $TARGET_IPv6\"}"
+                tests_array+="\"command\": \"ping -c 4 $TARGET_IPv4\", \"packet_loss\": \"$packet_loss\", \"avg_latency\": \"$avg_latency\", \"ipv6_command\": \"ping6 -c 4 $TARGET_IPv6\"}"
                 ;;
             "Porta "*)
-                json_data+="\"port\": \"$(echo $test_name | grep -oP '\d+')\", \"ipv4_command\": \"nc -zv -w 2 $TARGET_IPv4 $(echo $test_name | grep -oP '\d+')\", \"ipv6_command\": \"nc -zv -w 2 $TARGET_IPv6 $(echo $test_name | grep -oP '\d+')\", \"filtered_details\": \"${filtered_details:-N/A}\"}"
+                tests_array+="\"port\": \"$(echo $test_name | grep -oP '\d+')\", \"ipv4_command\": \"nc -zv -w 2 $TARGET_IPv4 $(echo $test_name | grep -oP '\d+')\", \"ipv6_command\": \"nc -zv -w 2 $TARGET_IPv6 $(echo $test_name | grep -oP '\d+')\", \"filtered_details\": \"$filtered_details\"}"
                 ;;
             "Nmap"*)
-                json_data+="\"command\": \"${nmap_cmd:-N/A}\", \"open_ports\": \"${open_ports:-N/A}\"}"
+                tests_array+="\"command\": \"$nmap_cmd\", \"open_ports\": \"$open_ports\"}"
                 ;;
-            *) json_data+="\"command\": \"N/A\"}" ;;
+            *) tests_array+="\"command\": \"N/A\"" ;;
         esac
-        json_data+="}, \"raw_output_file\": \"$(echo $test_name | tr ' ' '_' | tr -d ':').txt\"},"
-        [[ "$status" == *"✓"* ]] && ((success_count++)) || ((failure_count++))
+        tests_array+=$(cat <<EOF
+      },
+      "raw_output_file": "$(echo $test_name | tr ' ' '_' | tr -d ':').txt"
+    },
+EOF
+)
     done
-    json_data="${json_data%,]}"
-    json_data+="],\"statistics\": {\"total_tests\": ${#CHECKLIST[@]}, \"success_count\": $success_count, \"failure_count\": $failure_count, \"total_execution_time\": \"$(( $(date +%s) - START_TIME )) seconds\"}"
-    json_data+="}"
-    echo "$json_data" | jq '.' > "$JSON_FILE" 2>/dev/null || { print_status "error" "Falha ao salvar JSON (verifique se jq está instalado)"; return 1; }
-    print_status "success" "Resultados salvos em $JSON_FILE"
+    tests_array="${tests_array%,}"
+
+    local json_end=$(cat <<EOF
+  ],
+  "statistics": {
+    "total_tests": ${#CHECKLIST[@]},
+    "success_count": $success_count,
+    "failure_count": $failure_count,
+    "total_execution_time": "$(( $(date +%s) - START_TIME )) seconds"
+  }
+}
+EOF
+)
+
+    local json_data="$json_base$tests_array$json_end"
+    echo "DEBUG: JSON gerado: $json_data" > debug.log
+    echo "$json_data" > temp.json 2>>error.log
+    if jq '.' temp.json > "$JSON_FILE" 2>>error.log; then
+        rm -f temp.json
+        print_status "success" "Resultados salvos em $JSON_FILE"
+    else
+        cat error.log >&2
+        print_status "error" "Falha ao salvar JSON (veja error.log para detalhes)"
+        rm -f temp.json
+        return 1
+    fi
 }
 
 definir_alvo() {
@@ -243,9 +327,11 @@ test_ping() {
     else
         CHECKLIST+=("Ping $version: ✗ Falha")
     fi
-    kill -0 $pid 2>/dev/null && kill $pid
-    wait $pid 2>/dev/null
+    kill $pid 2>/dev/null || true
+    wait $pid 2>/dev/null || true
+    echo "DEBUG: Após test_ping, antes de salvar_json" >&2
     salvar_json
+    echo "DEBUG: Após salvar_json" >&2
 }
 
 test_ports() {
@@ -259,10 +345,12 @@ test_ports() {
         else
             CHECKLIST+=("Porta $port ($version): ✗ Fechada")
         fi
-        kill -0 $pid 2>/dev/null && kill $pid
-        wait $pid 2>/dev/null
+        kill $pid 2>/dev/null || true
+        wait $pid 2>/dev/null || true
     done
+    echo "DEBUG: Após test_ports, antes de salvar_json" >&2
     salvar_json
+    echo "DEBUG: Após salvar_json" >&2
 }
 
 analyze_nmap_results() {
@@ -310,19 +398,27 @@ executar_comando() {
         local results=$(wc -l < "$temp_output")
         [ "$results" -gt 0 ] && CHECKLIST+=("$name: ✓ $success_msg $results") || CHECKLIST+=("$name: ✓ $fail_msg")
     else
-        CHECKLIST+=("$name: ✗ Falha")
+        CHECKLIST+=("$name: ✗ Falha (verifique dependências, ex.: libnet.so.1 para firewalk ou módulo clusterd)")
     fi
     mv "$temp_output" "$output_file"
 }
 
 testar_ferramenta() {
     local tool="$1" cmd="$2" success_msg="$3" fail_msg="$4"
-    if ! command -v ${tool,,} &>/dev/null && ! python3 -m pip show ${tool,,} &>/dev/null; then
-        CHECKLIST+=("$tool: ✗ Não instalado")
+    if ! [ -f "$(echo "$cmd" | cut -d' ' -f1)" ] && ! command -v ${tool,,} &>/dev/null && ! python3 -m pip show ${tool,,} &>/dev/null; then
+        CHECKLIST+=("$tool: ✗ Não instalado ou arquivo não encontrado (instale com pip ou baixe o binário)")
         return 1
     fi
     local output_file="${tool,,}_output.txt"
     local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
+    
+    if [ "$TYPE_TARGET" = "IP" ] && [ "$tool" = "xray" ]; then
+        cmd_substituido=$(echo "$cmd_substituido" | sed "s|--url [^ ]*||")
+        print_status "info" "Executando $tool para IP $TARGET_IPv4"
+    else
+        print_status "info" "Executando $tool para $TARGET"
+    fi
+    
     loading_clock "$tool" 10 &
     pid=$!
     executar_comando "$cmd_substituido" "$tool" "$output_file" "$success_msg" "$fail_msg"
@@ -446,7 +542,7 @@ menu_personalizado() {
         print_status "info" "Menu de Ferramentas de Rede (ATIVO)"
         echo "1. Teste de Ping"
         echo "2. Teste de Portas"
-        echo "3. Teste HTTP"
+        echo "3. Teste FFuf Web"
         echo "4. Teste Ativo Completo"
         echo "5. Voltar ao menu principal"
         read -p "Escolha uma opção (1-5): " OPCAO
@@ -468,20 +564,17 @@ menu_personalizado() {
             3)
                 [ -z "$TARGET" ] && definir_alvo
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                if [ "$TYPE_TARGET" = "DOMAIN" ]; then
-                    local protocol=$(determinar_protocolo)
-                    loading_clock "Teste HTTP ($protocol)" 3 &
-                    pid=$!
-                    http_code=$(curl -sI "$protocol://$TARGET" | head -1 | cut -d' ' -f2)
-                    if [ -n "$http_code" ]; then
-                        CHECKLIST+=("HTTP ($protocol): ✓ Código $http_code")
-                    else
-                        CHECKLIST+=("HTTP ($protocol): ✗ Falha")
-                    fi
-                    kill -0 $pid 2>/dev/null && kill $pid
-                    wait $pid 2>/dev/null
+                if [ "$TYPE_TARGET" = "DOMAIN" ] && { nc -zv -w 2 "$TARGET_IPv4" 80 &>/dev/null || nc -zv -w 2 "$TARGET_IPv4" 443 &>/dev/null || nc -zv -w 2 "$TARGET_IPv6" 80 &>/dev/null || nc -zv -w 2 "$TARGET_IPv6" 443 &>/dev/null; }; then
+                    for ((i=0; i<${#FFUF_WEB_COMMANDS[@]}; i++)); do
+                        read -p "Deseja executar FFuf Web Teste $((i+1)) para $TARGET? (s/n): " ASK
+                        if [ "$ASK" = "s" ] || [ "$ASK" = "S" ]; then
+                            testar_ferramenta "ffuf" "${FFUF_WEB_COMMANDS[$i]}" "Diretórios encontrados:" "Nenhum diretório encontrado"
+                            salvar_json
+                        fi
+                    done
                 else
-                    CHECKLIST+=("HTTP: ✗ Teste requer domínio")
+                    CHECKLIST+=("FFuf Web: ✗ Portas HTTP/HTTPS não abertas")
+                    salvar_json
                 fi
                 ;;
             4)
