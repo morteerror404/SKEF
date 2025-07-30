@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Função para sanitizar strings para JSON
+sanitize_json_string() {
+    local input="$1"
+    # Remove caracteres de controle, aspas não escapadas, e sanitiza para JSON
+    echo -n "$input" | tr -d '\n\r\t' | sed 's/[^[:print:]]//g' | sed 's/"/\\"/g' | sed "s/'/\\'/g" | sed 's/\\/\\\\/g'
+}
+
 # Função para salvar resultados em JSON
 salvar_json() {
     # Definir o nome do arquivo JSON com base na data e hora atuais
@@ -9,17 +16,17 @@ salvar_json() {
     local json_data="{"
     
     # Metadados do script
-    json_data+="\"script\": {\"name\": \"AutoRecon Script\", \"version\": \"1.2.4\", \"os\": \"$(uname -a | tr -d '\n' | sed 's/[^[:print:]]//g')\", \"start_time\": \"$(date -d @$START_TIME '+%Y-%m-%dT%H:%M:%S')\", \"user\": \"$(whoami | tr -d '\n' | sed 's/[^[:print:]]//g')\"},"
+    json_data+="\"script\": {\"name\": \"AutoRecon Script\", \"version\": \"1.2.4\", \"os\": \"$(sanitize_json_string "$(uname -a)")\", \"start_time\": \"$(date -d @$START_TIME '+%Y-%m-%dT%H:%M:%S')\", \"user\": \"$(sanitize_json_string "$(whoami)")\"},"
     
     # Informações do alvo
-    json_data+="\"target\": {\"input\": \"$TARGET\", \"resolved_ipv4\": \"$TARGET_IPv4\", \"resolved_ipv6\": \"$TARGET_IPv6\", \"type\": \"$TYPE_TARGET\", \"protocol\": \"$(determinar_protocolo)\", \"resolution_time\": \"$(date +'%Y-%m-%dT%H:%M:%S')\"},"
+    json_data+="\"target\": {\"input\": \"$(sanitize_json_string "$TARGET")\", \"resolved_ipv4\": \"$(sanitize_json_string "$TARGET_IPv4")\", \"resolved_ipv6\": \"$(sanitize_json_string "$TARGET_IPv6")\", \"type\": \"$(sanitize_json_string "$TYPE_TARGET")\", \"protocol\": \"$(sanitize_json_string "$(determinar_protocolo)")\", \"resolution_time\": \"$(date +'%Y-%m-%dT%H:%M:%S')\"},"
     
     # Configurações das ferramentas
     json_data+="\"tools_config\": {"
-    json_data+="\"nmap\": {\"ipv4_commands\": $(printf '%s\n' "${NMAP_COMMANDS_IPV4[@]}" | jq -R . | jq -s .), \"ipv6_commands\": $(printf '%s\n' "${NMAP_COMMANDS_IPV6[@]}" | jq -R . | jq -s .), \"silence\": \"$NMAP_SILENCE\"},"
+    json_data+="\"nmap\": {\"ipv4_commands\": $(printf '%s\n' "${NMAP_COMMANDS_IPV4[@]}" | jq -R . | jq -s .), \"ipv6_commands\": $(printf '%s\n' "${NMAP_COMMANDS_IPV6[@]}" | jq -R . | jq -s .), \"silence\": \"$(sanitize_json_string "$NMAP_SILENCE")\"},"
     json_data+="\"ffuf\": {\"subdomain_commands\": $(printf '%s\n' "${FFUF_COMMANDS[@]}" | jq -R . | jq -s .), \"web_commands\": $(printf '%s\n' "${FFUF_WEB_COMMANDS[@]}" | jq -R . | jq -s .)},"
-    json_data+="\"sherlock\": \"$(echo "$SHERLOCK_COMMAND" | jq -R .)\","
-    json_data+="\"fierce\": \"$(echo "$FIERCE_COMMAND" | jq -R .)\""
+    json_data+="\"sherlock\": \"$(sanitize_json_string "$SHERLOCK_COMMAND")\","
+    json_data+="\"fierce\": \"$(sanitize_json_string "$FIERCE_COMMAND")\""
     json_data+="},"
     
     # Dependências
@@ -36,67 +43,66 @@ salvar_json() {
     json_data+="\"tests\": ["
     local success_count=0 failure_count=0
     for item in "${CHECKLIST[@]}"; do
-        item_sanitized=$(echo "$item" | sed 's/[^[:print:]]//g')
+        item_sanitized=$(sanitize_json_string "$item")
         IFS=':' read -ra parts <<< "$item_sanitized"
         test_name=$(echo "${parts[0]}" | xargs)
         status=$(echo "${parts[1]}" | xargs)
         message=$(echo "${parts[1]}" | cut -d' ' -f2- | xargs)
-        json_data+="{\"name\": \"$test_name\", \"status\": $([[ "$status" == *"✓"* ]] && echo "true" || echo "false"), \"message\": \"$message\", \"timestamp\": \"$(date +'%Y-%m-%dT%H:%M:%S')\", \"details\": {"
+        json_data+="{\"name\": \"$(sanitize_json_string "$test_name")\", \"status\": $([[ "$status" == *"✓"* ]] && echo "true" || echo "false"), \"message\": \"$(sanitize_json_string "$message")\", \"timestamp\": \"$(date +'%Y-%m-%dT%H:%M:%S')\", \"details\": {"
         case $test_name in
             "Ping"|"Ping Personalizado")
-                json_data+="\"command\": \"ping -c 4 $TARGET_IPv4\", \"packet_loss\": \"${packet_loss:-N/A}\", \"avg_latency\": \"${avg_latency:-N/A}\", \"ipv6_command\": \"ping6 -c 4 $TARGET_IPv6\"}"
+                json_data+="\"command\": \"$(sanitize_json_string "ping -c 4 $TARGET_IPv4")\", \"packet_loss\": \"${packet_loss:-N/A}\", \"avg_latency\": \"${avg_latency:-N/A}\", \"ipv6_command\": \"$(sanitize_json_string "ping6 -c 4 $TARGET_IPv6")\"}"
                 ;;
             "DNS"|"DNS Personalizado")
-                json_data+="\"command\": \"dig $TARGET +short\", \"resolved_ips\": \"${ips:-N/A}\"}"
+                json_data+="\"command\": \"$(sanitize_json_string "dig $TARGET +short")\", \"resolved_ips\": \"$(sanitize_json_string "${ips:-N/A}")\"}"
                 ;;
             "Porta "*)
-                json_data+="\"port\": \"$(echo $test_name | grep -oP '\d+')\", \"ipv4_command\": \"nc -zv -w 2 $TARGET_IPv4 $(echo $test_name | grep -oP '\d+')\", \"ipv6_command\": \"nc -zv -w 2 $TARGET_IPv6 $(echo $test_name | grep -oP '\d+')\", \"filtered_details\": \"${filtered_details:-N/A}\"}"
+                json_data+="\"port\": \"$(echo $test_name | grep -oP '\d+')\", \"ipv4_command\": \"$(sanitize_json_string "nc -zv -w 2 $TARGET_IPv4 $(echo $test_name | grep -oP '\d+')")\", \"ipv6_command\": \"$(sanitize_json_string "nc -zv -w 2 $TARGET_IPv6 $(echo $test_name | grep -oP '\d+')")\", \"filtered_details\": \"$(sanitize_json_string "${filtered_details:-N/A}")\"}"
                 ;;
             "Nmap"*)
-                json_data+="\"command\": \"${nmap_cmd:-N/A}\", \"open_ports\": \"${open_ports:-N/A}\", \"results_file\": \"$(basename "$RESULTS_DIR/nmap_$(echo $test_name | tr ' ' '_' | tr -d ':').xml\")\"}"
+                json_data+="\"command\": \"$(sanitize_json_string "${nmap_cmd:-N/A}")\", \"open_ports\": \"$(sanitize_json_string "${open_ports:-N/A}")\", \"results_file\": \"$(sanitize_json_string "$(basename "$RESULTS_DIR/nmap_$(echo $test_name | tr ' ' '_' | tr -d ':').xml")\")\"}"
                 ;;
             "FFUF"*)
-                json_data+="\"command\": \"${cmd_substituido:-N/A}\", \"results_file\": \"$(basename "$RESULTS_DIR/ffuf_$(echo $test_name | tr ' ' '_' | tr -d ':').csv\")\"}"
+                json_data+="\"command\": \"$(sanitize_json_string "${cmd_substituido:-N/A}")\", \"results_file\": \"$(sanitize_json_string "$(basename "$RESULTS_DIR/ffuf_$(echo $test_name | tr ' ' '_' | tr -d ':').csv")\")\"}"
                 ;;
             "WHOIS"|"WHOIS Personalizado")
-                json_data+="\"command\": \"${WHOIS_COMMAND:-N/A}\", \"results_file\": \"whois_output.txt\"}"
+                json_data+="\"command\": \"$(sanitize_json_string "${WHOIS_COMMAND:-N/A}")\", \"results_file\": \"$(sanitize_json_string "whois_output.txt")\"}"
                 ;;
             "Sherlock")
-                json_data+="\"command\": \"${SHERLOCK_COMMAND:-N/A}\", \"results_file\": \"sherlock_output.txt\"}"
+                json_data+="\"command\": \"$(sanitize_json_string "${SHERLOCK_COMMAND:-N/A}")\", \"results_file\": \"$(sanitize_json_string "sherlock_output.txt")\"}"
                 ;;
             "Fierce")
-                json_data+="\"command\": \"${FIERCE_COMMAND:-N/A}\", \"results_file\": \"fierce_output.txt\"}"
+                json_data+="\"command\": \"$(sanitize_json_string "${FIERCE_COMMAND:-N/A}")\", \"results_file\": \"$(sanitize_json_string "fierce_output.txt")\"}"
                 ;;
-            *) json_data+="\"command\": \"N/A\", \"results_file\": \"N/A\"}" ;;
+            *)
+                json_data+="\"command\": \"N/A\", \"results_file\": \"N/A\"}"
+                ;;
         esac
-        json_data+="}, \"raw_output_file\": \"$(basename "$RESULTS_DIR/$(echo $test_name | tr ' ' '_' | tr -d ':').txt\")\"},"
+        json_data+="}, \"raw_output_file\": \"$(sanitize_json_string "$(basename "$RESULTS_DIR/$(echo $test_name | tr ' ' '_' | tr -d ':').txt")")\"},"
         [[ "$status" == *"✓"* ]] && ((success_count++)) || ((failure_count++))
     done
     json_data="${json_data%,]}"
     
-    # Processar arquivos da pasta results
+    # Processar arquivos da pasta results (apenas .txt, .csv, .xml)
     json_data+="],\"results_files\": ["
     if [ -d "$RESULTS_DIR" ]; then
-        for file in "$RESULTS_DIR"/*; do
-            if [ -f "$file" ] && [ "$file" != "$json_file" ]; then
+        for file in "$RESULTS_DIR"/*.{txt,csv,xml}; do
+            if [ -f "$file" ]; then
                 local file_name=$(basename "$file")
                 local file_type="${file_name##*.}"
                 local content=""
                 case $file_type in
                     "txt")
-                        content=$(cat "$file" 2>/dev/null | tr -d '\n' | sed 's/[^[:print:]]//g' | jq -R .)
+                        content=$(cat "$file" 2>/dev/null | tr -d '\n\r\t' | sed 's/[^[:print:]]//g' | sed 's/"/\\"/g' | sed "s/'/\\'/g" | jq -R .)
                         ;;
                     "csv")
-                        content=$(awk -F',' 'NR>1 {print $0}' "$file" 2>/dev/null | tr -d '\n' | sed 's/[^[:print:]]//g' | jq -R . | jq -s .)
+                        content=$(awk -F',' 'NR>1 {print $0}' "$file" 2>/dev/null | tr -d '\n\r\t' | sed 's/[^[:print:]]//g' | sed 's/"/\\"/g' | sed "s/'/\\'/g" | jq -R . | jq -s .)
                         ;;
                     "xml")
-                        content=$(xmllint --format "$file" 2>/dev/null | tr -d '\n' | sed 's/[^[:print:]]//g' | jq -R .)
-                        ;;
-                    *)
-                        content=$(cat "$file" 2>/dev/null | tr -d '\n' | sed 's/[^[:print:]]//g' | jq -R .)
+                        content=$(xmllint --format "$file" 2>/dev/null | tr -d '\n\r\t' | sed 's/[^[:print:]]//g' | sed 's/"/\\"/g' | sed "s/'/\\'/g" | jq -R .)
                         ;;
                 esac
-                [ -n "$content" ] && json_data+="{\"file\": \"$file_name\", \"type\": \"$file_type\", \"content\": $content},"
+                [ -n "$content" ] && json_data+="{\"file\": \"$(sanitize_json_string "$file_name")\", \"type\": \"$file_type\", \"content\": $content},"
             fi
         done
         json_data="${json_data%,}"
