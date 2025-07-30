@@ -7,7 +7,7 @@ TARGET_IPv4=""
 TARGET_IPv6=""
 TYPE_TARGET=""
 CHECKLIST=()
-JSON_FILE="scan_results_ativo_$(date +%s).json"
+JSON_FILE="results/scan_results_ativo_$(date +%s).json"
 START_TIME=$(date +%s)
 
 # Definir cores ANSI
@@ -55,9 +55,9 @@ FFUF_WEB_COMMANDS=(
     "ffuf -u {PROTOCOL}://{TARGET}/FUZZ -w {WORDLIST_WEB} -mc 200,301,302 -recursion -recursion-depth 2 -o ffuf_web_output.csv -of csv"
 )
 AR_COMMANDS=(
-    "autorecon {TARGET_IP} --dir autorecon_output --only-scans"
-    "autorecon {TARGET_IP} --dir autorecon_output"
-    "autorecon {TARGET_IP} --dir autorecon_output --web"
+    "autorecon {TARGET_IP} -o autorecon_output --only-scans"
+    "autorecon {TARGET_IP} -o autorecon_output"
+    "autorecon {TARGET_IP} -o autorecon_output --web"
 )
 XRAY_COMMAND="xray ws -domain {TARGET} --json-output xray_output.json"
 FW_COMMAND="firewalk -S1-1024 -i eth0 -n {TARGET_IP} -o firewalk_output.txt"
@@ -170,6 +170,9 @@ salvar_json() {
     filtered_details="${filtered_details:-"N/A"}"
     nmap_cmd="${nmap_cmd:-"N/A"}"
     open_ports="${open_ports:-"N/A"}"
+
+    # Criar pasta results se não existir
+    mkdir -p results
 
     local json_base=$(cat <<EOF
 {
