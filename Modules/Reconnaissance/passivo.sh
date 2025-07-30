@@ -1,52 +1,7 @@
 #!/bin/bash
 
-#------------#------------# VARIÁVEIS GLOBAIS #------------#------------#
-ASK=""
-TARGET=""
-TARGET_IPv4=""
-TARGET_IPv6=""
-TYPE_TARGET=""
-CHECKLIST=()
-JSON_FILE="scan_results_passivo_$(date +%s).json"
-WORDLISTS_DIR="$HOME/wordlists"
-START_TIME=$(date +%s)
-
-# Definir cores ANSI
-if [ "$(tput colors)" -ge 8 ]; then
-    BLUE="\033[1;34m"
-    CYAN="\033[1;36m"
-    GREEN="\033[1;32m"
-    YELLOW="\033[1;33m"
-    PURPLE="\033[1;35m"
-    WHITE="\033[1;37m"
-    RED="\033[1;31m"
-    NC="\033[0m"
-else
-    BLUE=""
-    CYAN=""
-    GREEN=""
-    YELLOW=""
-    PURPLE=""
-    WHITE=""
-    RED=""
-    NC=""
-fi
-
-#------------#------------# VARIÁVEIS COMANDOS #------------#------------#
-FFUF_COMMANDS=(
-    "ffuf -u {PROTOCOL}://{TARGET}/ -H \"Host: FUZZ.{TARGET}\" -w {WORDLIST_SUBDOMAINS} -mc 200,301,302 -o ffuf_output.csv -of csv"
-    "ffuf -u {PROTOCOL}://{TARGET}/ -H \"Host: FUZZ.{TARGET}\" -w {WORDLIST_SUBDOMAINS} -mc 200,301,302 -fc 404 -o ffuf_output.csv -of csv"
-    "ffuf -u {PROTOCOL}://{TARGET}/ -H \"Host: FUZZ.{TARGET}\" -w {WORDLIST_SUBDOMAINS} -mc 200,301,302 -t 50 -recursion -recursion-depth 1 -o ffuf_output.csv -of csv"
-)
-ASM_COMMANDS=(
-    "python3 -m attacksurfacemapper -t {TARGET} -o asm_output.txt -sth"
-    "python3 -m attacksurfacemapper -t {TARGET} -o asm_output.txt -exp"
-    "python3 -m attacksurfacemapper -t {TARGET} -o asm_output.txt -sth -api"
-)
-GL_COMMAND="gitleaks detect --source . --no-git -c {TARGET} -o gitleaks_output.json"
-SH_COMMAND="python3 -m sherlock {TARGET} --output sherlock_output.txt"
-FIERCE_COMMAND="fierce --domain {TARGET} --subdomain-file {WORDLIST_SUBDOMAINS} --output fierce_output.txt"
-FR_COMMAND="python3 -m finalrecon --full {PROTOCOL}://{TARGET} --out finalrecon_output.txt"
+# Carrega o arquivo JSON.sh para usar suas funções e variáveis
+source ./JSON.sh
 
 #------------#------------# FUNÇÕES AUXILIARES #------------#------------#
 validar_root() {
@@ -95,7 +50,7 @@ print_clock_frame() {
         if [[ "$item_sanitized" == *"✓"* ]]; then
             echo -e " ${GREEN}✔ $item_sanitized${NC}"
         elif [[ "$item_sanitized" == *"✗"* ]]; then
-            4 echo -e " ${RED}✖ $item_sanitized${NC}"
+            echo -e " ${RED}✖ $item_sanitized${NC}"
         elif [[ "$item_sanitized" == *"⚠"* ]]; then
             echo -e " ${YELLOW}⚠ $item_sanitized${NC}"
         else
@@ -122,63 +77,7 @@ loading_clock() {
     done
 }
 
-verificar_tipo_alvo() {
-    local entrada=$(echo "$1" | sed -E 's|^https?://||; s|/.*$||; s|:[0-9]+$||')
-    if [[ $entrada =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-        echo "IP"
-    elif [[ $entrada =~ ^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$ ]]; then
-        echo "IP"
-    elif [[ $entrada =~ ^([a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}$ ]]; then
-        echo "DOMAIN"
-    else
-        echo "INVÁLIDO"
-    fi
-}
-
-determinar_protocolo() {
-    local protocol="http"
-    echo "$protocol"
-}
-
-substituir_variaveis() {
-    local cmd="$1" ip="$2"
-    local wordlist_subdomains="$WORDLISTS_DIR/SecLists/Discovery/DNS/subdomains-top1million-5000.txt"
-    [ ! -f "$wordlist_subdomains" ] && { wordlist_subdomains="/tmp/subdomains.txt"; curl -s https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-5000.txt -o "$wordlist_subdomains"; }
-    local protocol=$(determinar_protocolo)
-    echo "$cmd" | sed "s/{TARGET}/$TARGET/g; s/{TARGET_IP}/$ip/g; s/{PROTOCOL}/$protocol/g; s|{WORDLIST_SUBDOMAINS}|$wordlist_subdomains|g"
-}
-
-salvar_json() {
-    local json_data="{"
-    json_data+="\"script\": {\"name\": \"Passivo Recon Script\", \"version\": \"1.0\", \"os\": \"$(uname -a | tr -d '\n' | sed 's/[^[:print:]]//g')\", \"start_time\": \"$(date -d @$START_TIME '+%Y-%m-%dT%H:%M:%S')\", \"user\": \"$(whoami | tr -d '\n' | sed 's/[^[:print:]]//g')\"},"
-    json_data+="\"target\": {\"input\": \"$TARGET\", \"resolved_ipv4\": \"$TARGET_IPv4\", \"resolved_ipv6\": \"$TARGET_IPv6\", \"type\": \"$TYPE_TARGET\", \"protocol\": \"$(determinar_protocolo)\", \"resolution_time\": \"$(date +'%Y-%m-%dT%H:%M:%S')\"},"
-    json_data+="\"tools_config\": {\"ffuf\": {\"subdomain_commands\": $(printf '%s\n' "${FFUF_COMMANDS[@]}" | jq -R . | jq -s .)}, \"attacksurfacemapper\": $(printf '%s\n' "${ASM_COMMANDS[@]}" | jq -R . | jq -s .), \"gitleaks\": \"$GL_COMMAND\", \"sherlock\": \"$SH_COMMAND\", \"fierce\": \"$FIERCE_COMMAND\", \"finalrecon\": \"$FR_COMMAND\"},"
-    json_data+="\"dependencies\": {\"jq\": \"$(command -v jq &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"python3\": \"$(command -v python3 &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"attacksurfacemapper\": \"$(python3 -m pip show attacksurfacemapper &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"gitleaks\": \"$(command -v gitleaks &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"sherlock\": \"$(python3 -m pip show sherlock-project &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"fierce\": \"$(command -v fierce &>/dev/null && echo 'Instalado' || echo 'Não instalado')\", \"finalrecon\": \"$(python3 -m pip show finalrecon &>/dev/null && echo 'Instalado' || echo 'Não instalado')\"},"
-    json_data+="\"tests\": ["
-    local success_count=0 failure_count=0
-    for item in "${CHECKLIST[@]}"; do
-        item_sanitized=$(echo "$item" | sed 's/[^[:print:]]//g')
-        IFS=':' read -ra parts <<< "$item_sanitized"
-        test_name=$(echo "${parts[0]}" | xargs)
-        status=$(echo "${parts[1]}" | xargs)
-        message=$(echo "${parts[1]}" | cut -d' ' -f2- | xargs)
-        json_data+="{\"name\": \"$test_name\", \"status\": $([[ "$status" == *"✓"* ]] && echo "true" || echo "false"), \"message\": \"$message\", \"timestamp\": \"$(date +'%Y-%m-%dT%H:%M:%S')\", \"details\": {"
-        case $test_name in
-            "DNS"|"DNS Personalizado")
-                json_data+="\"command\": \"dig $TARGET +short\", \"resolved_ips\": \"${ips:-N/A}\"}"
-                ;;
-            *) json_data+="\"command\": \"N/A\"}" ;;
-        esac
-        json_data+="}, \"raw_output_file\": \"$(echo $test_name | tr ' ' '_' | tr -d ':').txt\"},"
-        [[ "$status" == *"✓"* ]] && ((success_count++)) || ((failure_count++))
-    done
-    json_data="${json_data%,]}"
-    json_data+="],\"statistics\": {\"total_tests\": ${#CHECKLIST[@]}, \"success_count\": $success_count, \"failure_count\": $failure_count, \"total_execution_time\": \"$(( $(date +%s) - START_TIME )) seconds\"}"
-    json_data+="}"
-    echo "$json_data" | jq '.' > "$JSON_FILE" 2>/dev/null || { print_status "error" "Falha ao salvar JSON (verifique se jq está instalado)"; return 1; }
-    print_status "success" "Resultados salvos em $JSON_FILE"
-}
-
+#------------#------------# FUNÇÕES DE TESTE #------------#------------#
 definir_alvo() {
     print_status "action" "Definindo alvo"
     read -p "Digite o IP, domínio ou URL alvo: " TARGET
