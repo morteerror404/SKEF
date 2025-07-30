@@ -3,7 +3,7 @@
 # Função para salvar resultados em JSON
 salvar_json() {
     # Definir o nome do arquivo JSON com base na data e hora atuais
-    local json_file="results/Analise $(date +'%d-%m-%Y %H.%M.%S').json"
+    local json_file="$RESULTS_DIR/Analise $(date +'%d-%m-%Y %H.%M.%S').json"
 
     # Iniciar a estrutura JSON
     local json_data="{"
@@ -53,10 +53,10 @@ salvar_json() {
                 json_data+="\"port\": \"$(echo $test_name | grep -oP '\d+')\", \"ipv4_command\": \"nc -zv -w 2 $TARGET_IPv4 $(echo $test_name | grep -oP '\d+')\", \"ipv6_command\": \"nc -zv -w 2 $TARGET_IPv6 $(echo $test_name | grep -oP '\d+')\", \"filtered_details\": \"${filtered_details:-N/A}\"}"
                 ;;
             "Nmap"*)
-                json_data+="\"command\": \"${nmap_cmd:-N/A}\", \"open_ports\": \"${open_ports:-N/A}\"}"
+                json_data+="\"command\": \"${nmap_cmd:-N/A}\", \"open_ports\": \"${open_ports:-N/A}\", \"results_file\": \"$(basename "$RESULTS_DIR/nmap_$(echo $test_name | tr ' ' '_' | tr -d ':').xml\")\"}"
                 ;;
             "FFUF"*)
-                json_data+="\"command\": \"${cmd_substituido:-N/A}\", \"results_file\": \"$(echo $test_name | tr ' ' '_' | tr -d ':').csv\"}"
+                json_data+="\"command\": \"${cmd_substituido:-N/A}\", \"results_file\": \"$(basename "$RESULTS_DIR/ffuf_$(echo $test_name | tr ' ' '_' | tr -d ':').csv\")\"}"
                 ;;
             "WHOIS"|"WHOIS Personalizado")
                 json_data+="\"command\": \"${WHOIS_COMMAND:-N/A}\", \"results_file\": \"whois_output.txt\"}"
@@ -67,28 +67,27 @@ salvar_json() {
             "Fierce")
                 json_data+="\"command\": \"${FIERCE_COMMAND:-N/A}\", \"results_file\": \"fierce_output.txt\"}"
                 ;;
-            *) json_data+="\"command\": \"N/A\"}" ;;
+            *) json_data+="\"command\": \"N/A\", \"results_file\": \"N/A\"}" ;;
         esac
-        json_data+="}, \"raw_output_file\": \"$(echo $test_name | tr ' ' '_' | tr -d ':').txt\"},"
+        json_data+="}, \"raw_output_file\": \"$(basename "$RESULTS_DIR/$(echo $test_name | tr ' ' '_' | tr -d ':').txt\")\"},"
         [[ "$status" == *"✓"* ]] && ((success_count++)) || ((failure_count++))
     done
     json_data="${json_data%,]}"
     
     # Processar arquivos da pasta results
     json_data+="],\"results_files\": ["
-    local results_dir="results"
-    if [ -d "$results_dir" ]; then
-        for file in "$results_dir"/*; do
-            if [ -f "$file" ]; then
+    if [ -d "$RESULTS_DIR" ]; then
+        for file in "$RESULTS_DIR"/*; do
+            if [ -f "$file" ] && [ "$file" != "$json_file" ]; then
                 local file_name=$(basename "$file")
                 local file_type="${file_name##*.}"
                 local content=""
                 case $file_type in
                     "txt")
-                        content=$(cat "$file" | tr -d '\n' | sed 's/[^[:print:]]//g' | jq -R .)
+                        content=$(cat "$file" 2>/dev/null | tr -d '\n' | sed 's/[^[:print:]]//g' | jq -R .)
                         ;;
                     "csv")
-                        content=$(awk -F',' 'NR>1 {print $0}' "$file" | tr -d '\n' | sed 's/[^[:print:]]//g' | jq -R . | jq -s .)
+                        content=$(awk -F',' 'NR>1 {print $0}' "$file" 2>/dev/null | tr -d '\n' | sed 's/[^[:print:]]//g' | jq -R . | jq -s .)
                         ;;
                     "xml")
                         content=$(xmllint --format "$file" 2>/dev/null | tr -d '\n' | sed 's/[^[:print:]]//g' | jq -R .)
@@ -97,7 +96,7 @@ salvar_json() {
                         content=$(cat "$file" 2>/dev/null | tr -d '\n' | sed 's/[^[:print:]]//g' | jq -R .)
                         ;;
                 esac
-                json_data+="{\"file\": \"$file_name\", \"type\": \"$file_type\", \"content\": $content},"
+                [ -n "$content" ] && json_data+="{\"file\": \"$file_name\", \"type\": \"$file_type\", \"content\": $content},"
             fi
         done
         json_data="${json_data%,}"
@@ -109,8 +108,8 @@ salvar_json() {
     json_data+="}"
     
     # Salvar o JSON
-    mkdir -p "$results_dir"
-    echo "$json_data" | jq '.' > "$json_file" 2>>error.log || { print_status "error" "Falha ao salvar JSON (verifique error.log)"; return 1; }
+    mkdir -p "$RESULTS_DIR"
+    echo "$json_data" | jq '.' > "$json_file" 2>>"$RESULTS_DIR/error.log" || { print_status "error" "Falha ao salvar JSON (verifique $RESULTS_DIR/error.log)"; return 1; }
     print_status "success" "Resultados salvos em $json_file"
 }
 

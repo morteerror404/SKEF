@@ -12,8 +12,8 @@ TARGET_IPv4=""
 TARGET_IPv6=""
 TYPE_TARGET=""
 CHECKLIST=()
-JSON_FILE="results/scan_results_$(date +%s).json"
 START_TIME=$(date +%s)
+RESULTS_DIR="results"
 
 # Definir cores ANSI
 if [ "$(tput colors)" -ge 8 ]; then
@@ -135,7 +135,6 @@ definir_alvo() {
     if [ "$TYPE_TARGET" = "INVÁLIDO" ]; then
         print_status "error" "Entrada inválida. Digite um IP, domínio ou URL válido."
         CHECKLIST+=("Alvo definido: ✗ Entrada inválida")
-        salvar_json
         return 1
     fi
     TARGET=$(echo "$TARGET" | sed -E 's|^https?://||; s|/.*$||; s|:[0-9]+$||')
@@ -144,7 +143,6 @@ definir_alvo() {
         TARGET_IPv6=$(dig +short AAAA "$TARGET" | grep -oP '^[0-9a-fA-F:]+$' | head -1)
         if [ -z "$TARGET_IPv4" ] && [ -z "$TARGET_IPv6" ]; then
             CHECKLIST+=("Resolução de IP: ✗ Não foi possível resolver IP para $TARGET")
-            salvar_json
             return 1
         fi
         [ -n "$TARGET_IPv4" ] && CHECKLIST+=("Resolução IPv4: ✓ $TARGET_IPv4")
@@ -153,7 +151,6 @@ definir_alvo() {
         TARGET_IPv4="$TARGET"
         CHECKLIST+=("Alvo definido: ✓ $TARGET (IPv4)")
     fi
-    salvar_json
 }
 
 #------------#------------# MENUS #------------#------------#
@@ -180,13 +177,13 @@ menu_personalizado() {
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
                 [ -n "$TARGET_IPv4" ] && test_ping "$TARGET_IPv4" "IPv4"
                 [ -n "$TARGET_IPv6" ] && test_ping "$TARGET_IPv6" "IPv6"
-                salvar_json
+                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
                 ;;
             2)
                 [ -z "$TARGET" ] && definir_alvo
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
                 [ "$TYPE_TARGET" = "DOMAIN" ] && test_dns
-                salvar_json
+                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
                 ;;
             3)
                 [ -z "$TARGET" ] && definir_alvo
@@ -195,33 +192,33 @@ menu_personalizado() {
                 IFS=',' read -ra PORT_ARRAY <<< "$PORTS"
                 [ -n "$TARGET_IPv4" ] && test_ports "$TARGET_IPv4" "IPv4" "${PORT_ARRAY[@]}"
                 [ -n "$TARGET_IPv6" ] && test_ports "$TARGET_IPv6" "IPv6" "${PORT_ARRAY[@]}"
-                salvar_json
+                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
                 ;;
             4)
                 [ -z "$TARGET" ] && definir_alvo
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
                 test_http
-                salvar_json
+                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
                 ;;
             5)
                 [ -z "$TARGET" ] && definir_alvo
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
                 test_whois
-                salvar_json
+                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
                 ;;
             6)
                 [ -z "$TARGET" ] && definir_alvo
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
                 Passivo_basico
                 Passivo_complexo
-                salvar_json
+                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
                 ;;
             7)
                 [ -z "$TARGET" ] && definir_alvo
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
                 Ativo_basico
                 Ativo_complexo
-                salvar_json
+                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
                 ;;
             8) break ;;
             *) print_status "error" "Opção inválida" ;;
@@ -262,7 +259,7 @@ menu_inicial() {
                 print_status "action" "Executando Reconhecimento Ativo..."
                 Ativo_basico
                 Ativo_complexo
-                salvar_json
+                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
                 ;;
             2)
                 definir_alvo
@@ -273,21 +270,21 @@ menu_inicial() {
                 print_status "action" "Executando Reconhecimento Passivo..."
                 Passivo_basico
                 Passivo_complexo
-                salvar_json
+                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
                 ;;
             3)
                 definir_alvo
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
                 Passivo_basico
                 Passivo_complexo
-                salvar_json
+                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
                 ;;
             4)
                 definir_alvo
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
                 Ativo_basico
                 Ativo_complexo
-                salvar_json
+                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
                 ;;
             5) menu_personalizado ;;
             6) print_status "info" "Saindo..."; exit 0 ;;

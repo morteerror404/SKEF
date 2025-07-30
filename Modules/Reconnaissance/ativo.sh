@@ -8,6 +8,7 @@ declare -A PORT_STATUS_IPV4
 declare -A PORT_STATUS_IPV6
 declare -A PORT_TESTS_IPV4
 declare -A PORT_TESTS_IPV6
+RESULTS_DIR="results"
 
 #------------#------------# VARIÁVEIS COMANDOS #------------#------------#
 NMAP_COMMANDS_IPV4=(
@@ -21,10 +22,10 @@ NMAP_COMMANDS_IPV6=(
     "nmap -6 {TARGET_IP} -sV -O -vv {NMAP_SILENCE}"
 )
 FFUF_COMMANDS=(
-    "ffuf -u {URL}/ -H \"Host: FUZZ.{TARGET}\" -w {WORDLIST_SUBDOMAINS} -mc 200,301,302 -o ffuf_output.csv -of csv"
+    "ffuf -u {URL}/ -H \"Host: FUZZ.{TARGET}\" -w {WORDLIST_SUBDOMAINS} -mc 200,301,302 -o $RESULTS_DIR/ffuf_output.csv -of csv"
 )
 FFUF_WEB_COMMANDS=(
-    "ffuf -u {URL}/FUZZ -w {WORDLIST_WEB} -mc 200,301,302 -o ffuf_web_output.csv -of csv"
+    "ffuf -u {URL}/FUZZ -w {WORDLIST_WEB} -mc 200,301,302 -o $RESULTS_DIR/ffuf_web_output.csv -of csv"
 )
 
 #------------#------------# FUNÇÕES AUXILIARES #------------#------------#
@@ -164,7 +165,7 @@ Ativo_complexo() {
     if [ -n "$TARGET_IPv4" ]; then
         for cmd in "${NMAP_COMMANDS_IPV4[@]}"; do
             local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
-            local output_file="nmap_$(echo "$cmd" | tr ' ' '_' | tr -d '{}').xml"
+            local output_file="$RESULTS_DIR/nmap_$(echo "$cmd" | tr ' ' '_' | tr -d '{}').xml"
             executar_comando "$cmd_substituido -oX $output_file" "Nmap IPv4" "$output_file" "Portas escaneadas" "Nenhuma porta encontrada"
             analyze_nmap_results "$output_file" "IPv4"
         done
@@ -173,7 +174,7 @@ Ativo_complexo() {
     if [ -n "$TARGET_IPv6" ]; then
         for cmd in "${NMAP_COMMANDS_IPV6[@]}"; do
             local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv6")
-            local output_file="nmap_$(echo "$cmd" | tr ' ' '_' | tr -d '{}').xml"
+            local output_file="$RESULTS_DIR/nmap_$(echo "$cmd" | tr ' ' '_' | tr -d '{}').xml"
             executar_comando "$cmd_substituido -oX $output_file" "Nmap IPv6" "$output_file" "Portas escaneadas" "Nenhuma porta encontrada"
             analyze_nmap_results "$output_file" "IPv6"
         done
@@ -182,11 +183,11 @@ Ativo_complexo() {
     if [ "$TYPE_TARGET" = "DOMAIN" ]; then
         for cmd in "${FFUF_COMMANDS[@]}"; do
             local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
-            executar_comando "$cmd_substituido" "FFUF Subdomínios" "ffuf_output.csv" "Subdomínios encontrados" "Nenhum subdomínio encontrado"
+            executar_comando "$cmd_substituido" "FFUF Subdomínios" "$RESULTS_DIR/ffuf_output.csv" "Subdomínios encontrados" "Nenhum subdomínio encontrado"
         done
         for cmd in "${FFUF_WEB_COMMANDS[@]}"; do
             local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
-            executar_comando "$cmd_substituido" "FFUF Web" "ffuf_web_output.csv" "Recursos web encontrados" "Nenhum recurso web encontrado"
+            executar_comando "$cmd_substituido" "FFUF Web" "$RESULTS_DIR/ffuf_web_output.csv" "Recursos web encontrados" "Nenhum recurso web encontrado"
         done
     fi
 }

@@ -1,9 +1,9 @@
 #!/bin/bash
 
 #------------#------------# VARIÁVEIS COMANDOS #------------#------------#
-WHOIS_COMMAND="whois {TARGET} > whois_output.txt"
-SHERLOCK_COMMAND="python3 -m sherlock {TARGET} --output sherlock_output.txt"
-FIERCE_COMMAND="fierce --domain {TARGET} --subdomain-file {WORDLIST_SUBDOMAINS} --output fierce_output.txt"
+WHOIS_COMMAND="whois {TARGET} > $RESULTS_DIR/whois_output.txt"
+SHERLOCK_COMMAND="python3 -m sherlock {TARGET} --output $RESULTS_DIR/sherlock_output.txt"
+FIERCE_COMMAND="fierce --domain {TARGET} --subdomain-file {WORDLIST_SUBDOMAINS} --output $RESULTS_DIR/fierce_output.txt"
 
 #------------#------------# FUNÇÕES AUXILIARES #------------#------------#
 substituir_variaveis_passivo() {
@@ -32,7 +32,7 @@ test_whois() {
         loading_clock "Teste WHOIS" 3 &
         pid=$!
         local cmd_substituido=$(substituir_variaveis_passivo "$WHOIS_COMMAND")
-        executar_comando_passivo "$cmd_substituido" "WHOIS" "whois_output.txt" "Informações obtidas" "Nenhuma informação obtida"
+        executar_comando_passivo "$cmd_substituido" "WHOIS" "$RESULTS_DIR/whois_output.txt" "Informações obtidas" "Nenhuma informação obtida"
         kill -0 $pid 2>/dev/null && kill $pid
         wait $pid 2>/dev/null
     else
@@ -72,9 +72,9 @@ Passivo_complexo() {
     print_status "info" "Executando testes PASSIVOS COMPLEXOS em $TARGET"
     if [ "$TYPE_TARGET" = "DOMAIN" ]; then
         local cmd_substituido=$(substituir_variaveis_passivo "$SHERLOCK_COMMAND")
-        executar_comando_passivo "$cmd_substituido" "Sherlock" "sherlock_output.txt" "Perfis encontrados" "Nenhum perfil encontrado"
+        executar_comando_passivo "$cmd_substituido" "Sherlock" "$RESULTS_DIR/sherlock_output.txt" "Perfis encontrados" "Nenhum perfil encontrado"
         cmd_substituido=$(substituir_variaveis_passivo "$FIERCE_COMMAND")
-        executar_comando_passivo "$cmd_substituido" "Fierce" "fierce_output.txt" "Subdomínios encontrados" "Nenhum subdomínio encontrado"
+        executar_comando_passivo "$cmd_substituido" "Fierce" "$RESULTS_DIR/fierce_output.txt" "Subdomínios encontrados" "Nenhum subdomínio encontrado"
         CHECKLIST+=("DNS Histórico: ⚠ Simulado")
         CHECKLIST+=("Threat Intel: ⚠ Simulado")
     else
