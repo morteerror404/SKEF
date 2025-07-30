@@ -31,7 +31,7 @@ print_clock_frame() {
     [ -n "$TARGET_IPv6" ] && echo -e "${GREEN}IPv6: $TARGET_IPv6${NC}"
     
     echo -e "\n   ${PURPLE}______${NC}"
-    echo -e " ${PURPLE}/${YELLOW}________${PURPLE}\\${NC}"
+    echo -e " ${PURPLE}/${YELLOW}________${PURPLE}"\ "${NC}"
     echo -e " ${PURPLE}|${CYAN}$hora${PURPLE}|${NC}"
     echo -e " ${PURPLE}|${YELLOW}________${PURPLE}|${NC}"
     if [ "$frame" -eq 1 ]; then
