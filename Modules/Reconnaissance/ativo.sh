@@ -3,7 +3,7 @@
 #------------#------------# VARIÁVEIS GLOBAIS #------------#------------#
 # Variáveis globais são definidas em autorecon.sh e acessadas aqui
 WORDLISTS_DIR="$HOME/wordlists"
-NMAP_SILENCE=""
+NMAP_SILENCE="-Pn"
 declare -A PORT_STATUS_IPV4
 declare -A PORT_STATUS_IPV6
 declare -A PORT_TESTS_IPV4

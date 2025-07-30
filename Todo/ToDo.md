@@ -1,15 +1,15 @@
 ## Ferramentas
 
 - [ ] - Testar o Auto recon
-- [ ] - Separa o Ativo do Passivo
+- [ x ] - Separa o Ativo do Passivo
 - [ ] - Pesquisar novas ferramentas para recon
 - [ ] - Ferramenta de teste de Input
 - [ ] - Ferramenta para teste de cache, header e metadata. 
 ## Aplicação Web
 
-- [ ] Pesquisar alguma coisa simples para subir no local host
+- [ x ] Pesquisar alguma coisa simples para subir no local host
 - [ ] Fazer o menu inicial 
-- [ ] Fazer o Layout inicial
+- [ x ] Fazer o Layout inicial
 - [ ] Fazer a página de relatórios
 - [ ] Back-end
 - [ ] Temas (claro, escuro, verde)

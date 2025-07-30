@@ -165,7 +165,7 @@ menu_personalizado() {
         centralizar "2. Teste DNS"
         centralizar "3. Teste de Portas"
         centralizar "4. Teste HTTP"
-        centralizar "5. Teste WHOIS"
+        centralizar "5. Use o FFUF"
         centralizar "6. Teste Passivo Completo"
         centralizar "7. Teste Ativo Completo"
         centralizar "8. Voltar ao menu principal"
