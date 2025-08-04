@@ -2,8 +2,9 @@
 
 # Generate-result.sh
 # Função: Processar resultados de autorecon.sh e gerar relatório final em Markdown
+# Dependências: utils.sh, ativo.sh
 
-# Carregar determinar_protocolo de ativo.sh
+source ./utils.sh
 source ./ativo.sh
 
 #------------#------------# FUNÇÕES AUXILIARES #------------#------------#
@@ -31,12 +32,12 @@ get_metadata() {
 get_tool_config() {
     local config="## Configurações das Ferramentas\n\n"
     config+="### Nmap\n"
-    config+="- **Comandos IPv4**: $(printf '%s, ' "${NMAP_COMMANDS_IPV4[@]}" | sed 's/, $//')\n"
-    config+="- **Comandos IPv6**: $(printf '%s, ' "${NMAP_COMMANDS_IPV6[@]}" | sed 's/, $//')\n\n"
+    config+="- **Comandos IPv4**: $(printf '%s, ' "${NMAP_COMMANDS_IPV4[@]}" | sed "s/{TARGET_IP}/$TARGET_IPv4/g" | sed 's/, $//')\n"
+    config+="- **Comandos IPv6**: $(printf '%s, ' "${NMAP_COMMANDS_IPV6[@]}" | sed "s/{TARGET_IP}/$TARGET_IPv6/g" | sed 's/, $//')\n\n"
     config+="### FFuf\n"
-    config+="- **Comandos de Subdomínios**: $(printf '%s, ' "${FFUF_SUBDOMAIN[@]}" | sed 's/, $//')\n"
-    config+="- **Comandos Web**: $(printf '%s, ' "${FFUF_DOMAINS[@]}" | sed 's/, $//')\n"
-    config+="- **Comandos Extensões**: $(printf '%s, ' "${FFUF_EXTENSIONS[@]}" | sed 's/, $//')\n\n"
+    config+="- **Comandos de Subdomínios**: $(printf '%s, ' "${FFUF_COMMANDS[@]}" | sed "s/{TARGET_IP}/$TARGET_IPv4/g; s/{TARGET}/$TARGET/g" | sed 's/, $//')\n"
+    config+="- **Comandos Web**: $(printf '%s, ' "${FFUF_WEB_COMMANDS[@]}" | sed "s/{TARGET_IP}/$TARGET_IPv4/g; s/{TARGET}/$TARGET/g" | sed 's/, $//')\n"
+    config+="- **Comandos Extensões**: $(printf '%s, ' "${FFUF_EXT_COMMANDS[@]}" | sed "s/{TARGET_IP}/$TARGET_IPv4/g; s/{TARGET}/$TARGET/g" | sed 's/, $//')\n\n"
     echo -e "$config"
 }
 
@@ -47,7 +48,8 @@ get_dependencies() {
     deps+="- **ffuf**: $(command -v ffuf &>/dev/null && echo 'Instalado' || echo 'Não instalado')\n"
     deps+="- **dig**: $(command -v dig &>/dev/null && echo 'Instalado' || echo 'Não instalado')\n"
     deps+="- **traceroute**: $(command -v traceroute &>/dev/null && echo 'Instalado' || echo 'Não instalado')\n"
-    deps+="- **curl**: $(command -v curl &>/dev/null && echo 'Instalado' || echo 'Não instalado')\n\n"
+    deps+="- **curl**: $(command -v curl &>/dev/null && echo 'Instalado' || echo 'Não instalado')\n"
+    deps+="- **xmllint**: $(command -v xmllint &>/dev/null && echo 'Instalado' || echo 'Não instalado')\n\n"
     echo -e "$deps"
 }
 
@@ -66,7 +68,7 @@ save_test_result() {
     fi
 
     echo -e "$test_entry" >> "$report_file" 2>>"$RESULTS_DIR/error.log" || {
-        echo "Falha ao salvar resultado do teste em $report_file (verifique $RESULTS_DIR/error.log)" >&2
+        print_status "error" "Falha ao salvar resultado do teste em $report_file (verifique $RESULTS_DIR/error.log)"
         return 1
     }
 }
@@ -101,25 +103,25 @@ process_test_results() {
                 details="  - Porta: $port\n  - Comando IPv4: $cmd_ipv4\n  - Comando IPv6: $cmd_ipv6"
                 ;;
             "Nmap"*)
-                local cmd=$(sanitize_string "${NMAP_COMMANDS_IPV4[*]}" || echo "N/A")
+                local cmd=$(sanitize_string "$(substituir_variaveis "${NMAP_COMMANDS_IPV4[*]}" "$TARGET_IPv4")")
                 local results_file=$(ls "$RESULTS_DIR"/nmap_*.xml 2>/dev/null | xargs -n1 basename | tr '\n' ',' | sed 's/,$//')
                 details="  - Comando: $cmd\n  - Arquivo de Resultados: ${results_file:-N/A}"
                 ;;
             "FFUF Subdomínios"*)
-                local cmd=$(sanitize_string "${FFUF_SUBDOMAIN[*]}")
+                local cmd=$(sanitize_string "$(substituir_variaveis "${FFUF_COMMANDS[*]}" "$TARGET_IPv4")")
                 details="  - Comando: $cmd\n  - Arquivo de Resultados: ffuf_subdomains.csv"
                 ;;
             "FFUF Web"*)
-                local cmd=$(sanitize_string "${FFUF_DOMAINS[*]}")
+                local cmd=$(sanitize_string "$(substituir_variaveis "${FFUF_WEB_COMMANDS[*]}" "$TARGET_IPv4")")
                 details="  - Comando: $cmd\n  - Arquivo de Resultados: ffuf_web.csv"
                 ;;
             "FFUF Extensões"*)
-                local cmd=$(sanitize_string "${FFUF_EXTENSIONS[*]}")
+                local cmd=$(sanitize_string "$(substituir_variaveis "${FFUF_EXT_COMMANDS[*]}" "$TARGET_IPv4")")
                 details="  - Comando: $cmd\n  - Arquivo de Resultados: ffuf_extensions.csv"
                 ;;
             "HTTP"*)
                 local cmd=$(sanitize_string "curl -sI $(determinar_protocolo)://$TARGET")
-                details="  - Comando: $cmd\n  - Arquivo de Resultados: curl_headers.txt"
+                details="  - Comando: $cmd\n  - Arquivo de Resultados: http_test.txt"
                 ;;
             "Traceroute"*)
                 local cmd=$(sanitize_string "traceroute $TARGET_IPv4")
@@ -151,14 +153,21 @@ process_result_files() {
                 case $file_type in
                     "txt") content=$(cat "$file" 2>/dev/null | sed 's/^/    /') ;;
                     "csv") content=$(awk -F',' 'NR>1 {print "    " $0}' "$file" 2>/dev/null) ;;
-                    "xml") content=$(xmllint --format "$file" 2>/dev/null | sed 's/^/    /') ;;
+                    "xml") 
+                        if command -v xmllint &>/dev/null; then
+                            content=$(xmllint --format "$file" 2>/dev/null | sed 's/^/    /')
+                        else
+                            content="    xmllint não instalado, conteúdo XML não formatado:\n$(cat "$file" | sed 's/^/    /')"
+                        fi
+                        ;;
                 esac
                 if [ -n "$content" ]; then
                     echo -e "### Arquivo: $file_name\n\`\`\`$file_type\n$content\n\`\`\`\n" >> "$report_file" 2>>"$RESULTS_DIR/error.log" || {
-                        echo "Falha ao incorporar $file_name no relatório (verifique $RESULTS_DIR/error.log)" >&2
+                        print_status "error" "Falha ao incorporar $file_name no relatório (verifique $RESULTS_DIR/error.log)"
                         continue
                     }
-                    rm "$file" 2>>"$RESULTS_DIR/error.log" && echo "Arquivo $file_name incorporado e excluído."
+                    # Arquivos não são mais excluídos automaticamente
+                    print_status "success" "Arquivo $file_name incorporado no relatório."
                 fi
             fi
         done
@@ -176,7 +185,7 @@ generate_statistics() {
     stats+="- **Testes com Falha**: $failure_count\n"
     stats+="- **Tempo Total de Execução**: $(( $(date +%s) - START_TIME )) segundos\n\n"
     echo -e "$stats" >> "$RESULTS_DIR/relatorio.md" 2>>"$RESULTS_DIR/error.log" || {
-        echo "Falha ao salvar estatísticas no relatório (verifique $RESULTS_DIR/error.log)" >&2
+        print_status "error" "Falha ao salvar estatísticas no relatório (verifique $RESULTS_DIR/error.log)"
         return 1
     }
 }
@@ -185,5 +194,5 @@ save_report() {
     IFS=' ' read -r success_count failure_count <<< "$(process_test_results)"
     process_result_files
     generate_statistics "$success_count" "$failure_count"
-    echo "Relatório final salvo em $RESULTS_DIR/relatorio.md"
+    print_status "success" "Relatório final salvo em $RESULTS_DIR/relatorio.md"
 }

@@ -2,6 +2,28 @@
 
 # utils.sh
 # Função: Funções compartilhadas entre scripts
+# Dependências: Variáveis globais TARGET, TYPE_TARGET, TARGET_IPv4, TARGET_IPv6, CHECKLIST
+
+# Definir cores ANSI
+if [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]; then
+    BLUE="\033[1;34m"
+    CYAN="\033[1;36m"
+    GREEN="\033[1;32m"
+    YELLOW="\033[1;33m"
+    PURPLE="\033[1;35m"
+    WHITE="\033[1;37m"
+    RED="\033[1;31m"
+    NC="\033[0m"
+else
+    BLUE=""
+    CYAN=""
+    GREEN=""
+    YELLOW=""
+    PURPLE=""
+    WHITE=""
+    RED=""
+    NC=""
+fi
 
 print_status() {
     local color="$1" message="$2"
@@ -15,6 +37,10 @@ print_status() {
 
 centralizar() {
     local texto="$1"
+    if ! command -v tput &>/dev/null; then
+        echo "$texto"
+        return
+    fi
     local largura_terminal=$(tput cols)
     local comprimento_texto=${#texto}
     local espaco=$(( (largura_terminal - comprimento_texto) / 2 ))
@@ -24,7 +50,7 @@ centralizar() {
 print_clock_frame() {
     local frame=$1 task=$2 hora=$(date +"%H:%M:%S")
     clear
-    echo -e "${BLUE}=== Target: ${CYAN}$TARGET ${BLUE}(${TYPE_TARGET}) ===${NC}"
+    echo -e "${BLUE}=== Target: ${CYAN}${TARGET:-N/A} ${BLUE}(${TYPE_TARGET:-N/A}) ===${NC}"
     [ -n "$TARGET_IPv4" ] && echo -e "${GREEN}IPv4: $TARGET_IPv4${NC}"
     [ -n "$TARGET_IPv6" ] && echo -e "${GREEN}IPv6: $TARGET_IPv6${NC}"
     echo -e "\n   ${PURPLE}______${NC}"
@@ -47,28 +73,3 @@ print_clock_frame() {
             echo -e " ${GREEN}✔ $item_sanitized${NC}"
         elif [[ "$item_sanitized" == *"✗"* ]]; then
             echo -e " ${RED}✖ $item_sanitized${NC}"
-        elif [[ "$item_sanitized" == *"⚠"* ]]; then
-            echo -e " ${YELLOW}⚠ $item_sanitized${NC}"
-        else
-            echo -e " - $item_sanitized"
-        fi
-    done
-}
-
-loading_clock() {
-    local task="$1" duration=${2:-3}
-    local end_time=$((SECONDS + duration))
-    local pid
-    while [ $SECONDS -lt $end_time ]; do
-        print_clock_frame 1 "$task" &
-        pid=$!
-        sleep 0.3
-        kill -0 $pid 2>/dev/null && kill $pid
-        wait $pid 2>/dev/null
-        print_clock_frame 2 "$task" &
-        pid=$!
-        sleep 0.3
-        kill -0 $pid 2>/dev/null && kill $pid
-        wait $pid 2>/dev/null
-    done
-}

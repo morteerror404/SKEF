@@ -1,9 +1,10 @@
 #!/bin/bash
 
 # ativo.sh
-# Função: Executar testes ativos (ping, portas, Nmap, FFUF, dig, traceroute, curl) e retornar resultados para autorecon.sh
+# Função: Executar testes ativos (ping, portas, Nmap, FFUF) e retornar resultados para autorecon.sh
+# Dependências: utils.sh
 
-# Exportar funções para uso em outros scripts
+source ./utils.sh
 export -f determinar_protocolo
 
 #------------#------------# VARIÁVEIS GLOBAIS #------------#------------#
@@ -25,13 +26,13 @@ NMAP_COMMANDS_IPV6=(
     "nmap -6 {TARGET_IP} -vv -O -Pn"
     "nmap -6 {TARGET_IP} -sV -O -vv -Pn"
 )
-FFUF_SUBDOMAIN=(
+FFUF_COMMANDS=(
     "ffuf -u {URL}/ -H \"Host: FUZZ.{TARGET}\" -w {WORDLIST_SUBDOMAINS} -mc 200,301,302 -o $RESULTS_DIR/ffuf_subdomains.csv -of csv"
 )
-FFUF_DOMAINS=(
+FFUF_WEB_COMMANDS=(
     "ffuf -u {URL}/FUZZ -w {WORDLIST_WEB} -mc 200,301,302 -o $RESULTS_DIR/ffuf_web.csv -of csv"
 )
-FFUF_EXTENSIONS=(
+FFUF_EXT_COMMANDS=(
     "ffuf -u {URL}/index.FUZZ -w $WORDLISTS_DIR/SecLists/Discovery/Web-Content/web-extensions.txt -mc 200,301,302 -o $RESULTS_DIR/ffuf_extensions.csv -of csv"
 )
 
@@ -46,8 +47,20 @@ substituir_variaveis() {
     local cmd="$1" ip="$2"
     local wordlist_subdomains="$WORDLISTS_DIR/SecLists/Discovery/DNS/subdomains-top1million-5000.txt"
     local wordlist_web="$WORDLISTS_DIR/SecLists/Discovery/Web-Content/common.txt"
-    [ ! -f "$wordlist_subdomains" ] && { wordlist_subdomains="/tmp/subdomains.txt"; curl -s https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-5000.txt -o "$wordlist_subdomains"; }
-    [ ! -f "$wordlist_web" ] && { wordlist_web="/tmp/common.txt"; curl -s https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -o "$wordlist_web"; }
+    [ ! -f "$wordlist_subdomains" ] && { 
+        wordlist_subdomains="/tmp/subdomains.txt"
+        curl -s https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-5000.txt -o "$wordlist_subdomains" || {
+            print_status "error" "Falha ao baixar wordlist de subdomínios"
+            return 1
+        }
+    }
+    [ ! -f "$wordlist_web" ] && { 
+        wordlist_web="/tmp/common.txt"
+        curl -s https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -o "$wordlist_web" || {
+            print_status "error" "Falha ao baixar wordlist web"
+            return 1
+        }
+    }
     local protocol=$(determinar_protocolo)
     local url="$protocol://$ip"
     echo "$cmd" | sed "s/{TARGET}/$TARGET/g; s/{TARGET_IP}/$ip/g; s/{URL}/$url/g; s|{WORDLIST_SUBDOMAINS}|$wordlist_subdomains|g; s|{WORDLIST_WEB}|$wordlist_web|g"
@@ -68,6 +81,10 @@ executar_comando() {
 
 analyze_nmap_results() {
     local xml_file="$1" ip_version="$2"
+    if [ ! -f "$xml_file" ]; then
+        print_status "error" "Arquivo $xml_file não encontrado"
+        return 1
+    fi
     local -n port_status="PORT_STATUS_$ip_version"
     local -n port_tests="PORT_TESTS_$ip_version"
     local ports=($(grep -oP 'portid="\d+"' "$xml_file" | cut -d'"' -f2 | sort -u))
@@ -92,7 +109,7 @@ consolidar_portas() {
                 "filtered") ((filtered_count++)) ;;
             esac
         done
-        local total_tests=${port_tests[$port]}
+        local total_tests=${port_tests["$port"]}
         if [ $open_count -eq $total_tests ]; then
             CHECKLIST+=("Porta $port ($ip_version): ✓ Aberta")
         elif [ $closed_count -eq $total_tests ]; then
@@ -112,8 +129,8 @@ test_ping() {
     pid=$!
     local ping_result=$($ping_cmd 2>&1)
     if [ $? -eq 0 ]; then
-        packet_loss=$(echo "$ping_result" | grep -oP '\d+(?=% packet loss)')
-        avg_latency=$(echo "$ping_result" | grep -oPm1 '[\d.]+(?=\s*ms$)' | tail -1)
+        packet_loss=$(echo "$ping_result" | grep -oP '\d+(?=% packet loss)' || echo "0")
+        avg_latency=$(echo "$ping_result" | grep -oPm1 '[\d.]+(?=\s*ms$)' | tail -1 || echo "N/A")
         CHECKLIST+=("Ping $version: ✓ Sucesso (Perda: ${packet_loss}%, Latência: ${avg_latency}ms)")
     else
         CHECKLIST+=("Ping $version: ✗ Falha")
@@ -122,47 +139,21 @@ test_ping() {
     wait $pid 2>/dev/null
 }
 
-test_dig() {
-    print_status "action" "Executando teste DNS com dig"
-    local output_file="$RESULTS_DIR/dig_output.txt"
-    local dig_result=$(dig "$TARGET" ANY +short >"$output_file" 2>&1)
-    if [ $? -eq 0 ]; then
-        local resolved_ips=$(cat "$output_file" | grep -oP '(\d+\.\d+\.\d+\.\d+|[:0-9a-fA-F]+)' | tr '\n' ',' | sed 's/,$//')
-        [ -n "$resolved_ips" ] && CHECKLIST+=("DNS: ✓ IPs resolvidos ($resolved_ips)") || CHECKLIST+=("DNS: ✗ Nenhum IP resolvido")
-    else
-        CHECKLIST+=("DNS: ✗ Falha")
-    fi
-}
-
-test_traceroute() {
-    print_status "action" "Executando traceroute"
-    local output_file="$RESULTS_DIR/traceroute_output.txt"
-    local traceroute_cmd="traceroute $TARGET_IPv4" && [ -n "$TARGET_IPv6" ] && traceroute_cmd="traceroute6 $TARGET_IPv6"
-    local traceroute_result=$($traceroute_cmd >"$output_file" 2>&1)
-    if [ $? -eq 0 ]; then
-        CHECKLIST+=("Traceroute: ✓ Sucesso")
-    else
-        CHECKLIST+=("Traceroute: ✗ Falha")
-    fi
-}
-
-test_curl_headers() {
-    print_status "action" "Verificando headers HTTP com curl"
-    local output_file="$RESULTS_DIR/curl_headers.txt"
+test_http() {
+    print_status "action" "Testando HTTP"
     local protocol=$(determinar_protocolo)
-    local curl_result=$(curl -sI "$protocol://$TARGET" >"$output_file" 2>&1)
-    if [ $? -eq 0 ]; then
-        local http_code=$(head -1 "$output_file" | cut -d' ' -f2)
-        CHECKLIST+=("HTTP Headers ($protocol): ✓ Código $http_code")
+    local output_file="$RESULTS_DIR/http_test.txt"
+    if curl -s -o "$output_file" -w "%{http_code}" "$protocol://$TARGET" | grep -qE '200|301|302'; then
+        CHECKLIST+=("HTTP ($protocol): ✓ Servidor ativo")
     else
-        CHECKLIST+=("HTTP Headers ($protocol): ✗ Falha")
+        CHECKLIST+=("HTTP ($protocol): ✗ Servidor inativo ou erro")
     fi
 }
 
 test_ffuf_subdomains() {
     if [ "$TYPE_TARGET" = "DOMAIN" ]; then
-        for cmd in "${FFUF_SUBDOMAIN[@]}"; do
-            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
+        for cmd in "${FFUF_COMMANDS[@]}"; do
+            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4") || return 1
             executar_comando "$cmd_substituido" "FFUF Subdomínios" "$RESULTS_DIR/ffuf_subdomains.csv" "Subdomínios encontrados" "Nenhum subdomínio encontrado"
         done
     else
@@ -172,8 +163,8 @@ test_ffuf_subdomains() {
 
 test_ffuf_directories() {
     if [ "$TYPE_TARGET" = "DOMAIN" ]; then
-        for cmd in "${FFUF_DOMAINS[@]}"; do
-            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
+        for cmd in "${FFUF_WEB_COMMANDS[@]}"; do
+            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4") || return 1
             executar_comando "$cmd_substituido" "FFUF Web" "$RESULTS_DIR/ffuf_web.csv" "Recursos web encontrados" "Nenhum recurso web encontrado"
         done
     else
@@ -183,8 +174,8 @@ test_ffuf_directories() {
 
 test_ffuf_extensions() {
     if [ "$TYPE_TARGET" = "DOMAIN" ]; then
-        for cmd in "${FFUF_EXTENSIONS[@]}"; do
-            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
+        for cmd in "${FFUF_EXT_COMMANDS[@]}"; do
+            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4") || return 1
             executar_comando "$cmd_substituido" "FFUF Extensões" "$RESULTS_DIR/ffuf_extensions.csv" "Extensões encontradas" "Nenhuma extensão encontrada"
         done
     else
@@ -211,7 +202,7 @@ Ativo_complexo() {
             local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
             local output_file="$RESULTS_DIR/nmap_ipv4_$(echo "$cmd" | tr ' ' '_' | tr -d '{}').xml"
             executar_comando "$cmd_substituido -oX $output_file" "Nmap IPv4" "$output_file" "Portas escaneadas" "Nenhuma porta encontrada"
-            analyze_nmap_results "$output_file" "IPv4"
+            [ -f "$output_file" ] && analyze_nmap_results "$output_file" "IPv4"
         done
         consolidar_portas "IPv4"
     fi
@@ -220,7 +211,7 @@ Ativo_complexo() {
             local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv6")
             local output_file="$RESULTS_DIR/nmap_ipv6_$(echo "$cmd" | tr ' ' '_' | tr -d '{}').xml"
             executar_comando "$cmd_substituido -oX $output_file" "Nmap IPv6" "$output_file" "Portas escaneadas" "Nenhuma porta encontrada"
-            analyze_nmap_results "$output_file" "IPv6"
+            [ -f "$output_file" ] && analyze_nmap_results "$output_file" "IPv6"
         done
         consolidar_portas "IPv6"
     fi

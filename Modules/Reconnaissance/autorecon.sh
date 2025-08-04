@@ -2,8 +2,9 @@
 
 # autorecon.sh
 # Função: Controlador principal, gerencia menus, chama testes e organiza resultados para Generate-result.sh
+# Dependências: utils.sh, ativo.sh, Generate-result.sh
 
-# Carrega os scripts de teste
+source ./utils.sh
 source ./ativo.sh
 # source ./passivo.sh  # Descomentar quando passivo.sh estiver implementado
 
@@ -16,109 +17,17 @@ CHECKLIST=()
 START_TIME=$(date +%s)
 RESULTS_DIR="results"
 
-# Definir cores ANSI
-if [ "$(tput colors)" -ge 8 ]; then
-    BLUE="\033[1;34m"
-    CYAN="\033[1;36m"
-    GREEN="\033[1;32m"
-    YELLOW="\033[1;33m"
-    PURPLE="\033[1;35m"
-    WHITE="\033[1;37m"
-    RED="\033[1;31m"
-    NC="\033[0m"
-else
-    BLUE=""
-    CYAN=""
-    GREEN=""
-    YELLOW=""
-    PURPLE=""
-    WHITE=""
-    RED=""
-    NC=""
-fi
+# Exportar cores para outros scripts
+export BLUE CYAN GREEN YELLOW PURPLE WHITE RED NC
 
 #------------#------------# FUNÇÕES AUXILIARES #------------#------------#
 validar_root() {
     if [ "$(id -u)" -ne 0 ]; then
-        echo -e "${RED}[✗] Este script requer privilégios de root. Execute com sudo.${NC}"
+        print_status "error" "Este script requer privilégios de root. Execute com sudo."
         exit 1
     fi
-    echo -e "${GREEN}[✔] Executando como root.${NC}"
+    print_status "success" "Executando como root."
 }
-
-centralizar() {
-    local texto="$1"
-    local largura_terminal=$(tput cols)
-    local comprimento_texto=${#texto}
-    local espaco=$(( (largura_terminal - comprimento_texto) / 2 ))
-    printf "%*s%s\n" $espaco "" "$texto"
-}
-
-#------------#------------# FUNÇÕES GRÁFICAS #------------#------------#
-
-print_status() {
-    local color="$1" message="$2"
-    case "$color" in
-        "info") echo -e "${BLUE}[+] $message${NC}" ;;
-        "action") echo -e "${YELLOW}[▶] $message${NC}" ;;
-        "success") echo -e "${GREEN}[✔] $message${NC}" ;;
-        "error") echo -e "${RED}[✗] $message${NC}" ;;
-    esac
-}
-
-print_clock_frame() {
-    local frame=$1 task=$2 hora=$(date +"%H:%M:%S")
-    clear
-    echo -e "${BLUE}=== Target: ${CYAN}$TARGET ${BLUE}(${TYPE_TARGET}) ===${NC}"
-    [ -n "$TARGET_IPv4" ] && echo -e "${GREEN}IPv4: $TARGET_IPv4${NC}"
-    [ -n "$TARGET_IPv6" ] && echo -e "${GREEN}IPv6: $TARGET_IPv6${NC}"
-    echo -e "\n   ${PURPLE}______${NC}"
-    echo -e " ${PURPLE}/${YELLOW}________${PURPLE}\\${NC}"
-    echo -e " ${PURPLE}|${CYAN}$hora${PURPLE}|${NC}"
-    echo -e " ${PURPLE}|${YELLOW}________${PURPLE}|${NC}"
-    if [ "$frame" -eq 1 ]; then
-        echo -e " ${PURPLE}|${YELLOW}........${PURPLE}|${NC}"
-        echo -e " ${PURPLE}|${YELLOW}........${PURPLE}|${NC}"
-    else
-        echo -e " ${PURPLE}|${YELLOW}        ${PURPLE}|${NC}"
-        echo -e " ${PURPLE}|${YELLOW}        ${PURPLE}|${NC}"
-    fi
-    echo -e " ${PURPLE}\\ ${YELLOW}______${PURPLE} /${NC}"
-    echo -e "\n${WHITE}Executando: ${CYAN}$task${NC}"
-    echo -e "\n${GREEN}Checklist:${NC}"
-    for item in "${CHECKLIST[@]}"; do
-        item_sanitized=$(echo "$item" | sed 's/[^[:print:]]//g')
-        if [[ "$item_sanitized" == *"✓"* ]]; then
-            echo -e " ${GREEN}✔ $item_sanitized${NC}"
-        elif [[ "$item_sanitized" == *"✗"* ]]; then
-            echo -e " ${RED}✖ $item_sanitized${NC}"
-        elif [[ "$item_sanitized" == *"⚠"* ]]; then
-            echo -e " ${YELLOW}⚠ $item_sanitized${NC}"
-        else
-            echo -e " - $item_sanitized"
-        fi
-    done
-}
-
-loading_clock() {
-    local task="$1" duration=${2:-3}
-    local end_time=$((SECONDS + duration))
-    local pid
-    while [ $SECONDS -lt $end_time ]; do
-        print_clock_frame 1 "$task" &
-        pid=$!
-        sleep 0.3
-        kill -0 $pid 2>/dev/null && kill $pid
-        wait $pid 2>/dev/null
-        print_clock_frame 2 "$task" &
-        pid=$!
-        sleep 0.3
-        kill -0 $pid 2>/dev/null && kill $pid
-        wait $pid 2>/dev/null
-    done
-}
-
-#------------#------------# FUNÇÕES AUXILIARES #------------#------------#
 
 verificar_tipo_alvo() {
     local entrada=$(echo "$1" | sed -E 's|^https?://||; s|/.*$||; s|:[0-9]+$||')
@@ -144,6 +53,11 @@ definir_alvo() {
     fi
     TARGET=$(echo "$TARGET" | sed -E 's|^https?://||; s|/.*$||; s|:[0-9]+$||')
     if [ "$TYPE_TARGET" = "DOMAIN" ]; then
+        if ! dig +short A "$TARGET" &>/dev/null; then
+            print_status "error" "Falha ao resolver DNS. Verifique a conectividade ou o domínio."
+            CHECKLIST+=("Resolução de IP: ✗ Falha na resolução DNS para $TARGET")
+            return 1
+        fi
         TARGET_IPv4=$(dig +short A "$TARGET" | grep -oP '^\d+\.\d+\.\d+\.\d+$' | head -1)
         TARGET_IPv6=$(dig +short AAAA "$TARGET" | grep -oP '^[0-9a-fA-F:]+$' | head -1)
         if [ -z "$TARGET_IPv4" ] && [ -z "$TARGET_IPv6" ]; then
@@ -158,8 +72,45 @@ definir_alvo() {
     fi
 }
 
-#------------#------------# MENUS #------------#------------#
+#------------#------------# FUNÇÕES DE TESTE #------------#------------#
+test_dig() {
+    print_status "action" "Executando teste DNS com dig"
+    local output_file="$RESULTS_DIR/dig_output.txt"
+    local dig_result=$(dig "$TARGET" ANY +short >"$output_file" 2>&1)
+    if [ $? -eq 0 ]; then
+        local resolved_ips=$(cat "$output_file" | grep -oP '(\d+\.\d+\.\d+\.\d+|[:0-9a-fA-F]+)' | tr '\n' ',' | sed 's/,$//')
+        [ -n "$resolved_ips" ] && CHECKLIST+=("DNS: ✓ IPs resolvidos ($resolved_ips)") || CHECKLIST+=("DNS: ✗ Nenhum IP resolvido")
+    else
+        CHECKLIST+=("DNS: ✗ Falha")
+    fi
+}
 
+test_traceroute() {
+    print_status "action" "Executando traceroute"
+    local output_file="$RESULTS_DIR/traceroute_output.txt"
+    local traceroute_cmd="traceroute $TARGET_IPv4" && [ -n "$TARGET_IPv6" ] && traceroute_cmd="traceroute6 $TARGET_IPv6"
+    local traceroute_result=$($traceroute_cmd >"$output_file" 2>&1)
+    if [ $? -eq 0 ]; then
+        CHECKLIST+=("Traceroute: ✓ Sucesso")
+    else
+        CHECKLIST+=("Traceroute: ✗ Falha")
+    fi
+}
+
+test_curl_headers() {
+    print_status "action" "Verificando headers HTTP com curl"
+    local output_file="$RESULTS_DIR/curl_headers.txt"
+    local protocol=$(determinar_protocolo)
+    local curl_result=$(curl -sI "$protocol://$TARGET" >"$output_file" 2>&1)
+    if [ $? -eq 0 ]; then
+        local http_code=$(head -1 "$output_file" | cut -d' ' -f2)
+        CHECKLIST+=("HTTP Headers ($protocol): ✓ Código $http_code")
+    else
+        CHECKLIST+=("HTTP Headers ($protocol): ✗ Falha")
+    fi
+}
+
+#------------#------------# MENUS #------------#------------#
 menu_personalizado() {
     while true; do
         clear
@@ -205,15 +156,17 @@ menu_personalizado() {
 
 menu_inicial() {
     # Instalar dependências
-    for cmd in jq dig; do
+    for cmd in jq dig nmap ffuf traceroute curl; do
         if ! command -v $cmd &>/dev/null; then
             print_status "info" "Instalando $cmd..."
             if command -v apt-get &>/dev/null; then
                 sudo apt-get install -y ${cmd/dig/dnsutils} >/dev/null
             elif command -v yum &>/dev/null; then
                 sudo yum install -y ${cmd/dig/bind-utils} >/dev/null
+            elif command -v pacman &>/dev/null; then
+                sudo pacman -S --noconfirm ${cmd/dig/bind-tools} >/dev/null
             else
-                print_status "error" "Nenhum gerenciador de pacotes suportado encontrado."
+                print_status "error" "Nenhum gerenciador de pacotes suportado encontrado para $cmd."
                 exit 1
             fi
         fi
