@@ -17,9 +17,6 @@ CHECKLIST=()
 START_TIME=$(date +%s)
 RESULTS_DIR="results"
 
-# Exportar cores para outros scripts
-export BLUE CYAN GREEN YELLOW PURPLE WHITE RED NC
-
 #------------#------------# FUNÇÕES AUXILIARES #------------#------------#
 validar_root() {
     if [ "$(id -u)" -ne 0 ]; then
@@ -156,15 +153,15 @@ menu_personalizado() {
 
 menu_inicial() {
     # Instalar dependências
-    for cmd in jq dig nmap ffuf traceroute curl; do
+    for cmd in jq dig nmap ffuf traceroute curl nc; do
         if ! command -v $cmd &>/dev/null; then
             print_status "info" "Instalando $cmd..."
             if command -v apt-get &>/dev/null; then
-                sudo apt-get install -y ${cmd/dig/dnsutils} >/dev/null
+                sudo apt-get install -y ${cmd/dig/dnsutils} ${cmd/nc/netcat-traditional} >/dev/null
             elif command -v yum &>/dev/null; then
-                sudo yum install -y ${cmd/dig/bind-utils} >/dev/null
+                sudo yum install -y ${cmd/dig/bind-utils} ${cmd/nc/nmap-ncat} >/dev/null
             elif command -v pacman &>/dev/null; then
-                sudo pacman -S --noconfirm ${cmd/dig/bind-tools} >/dev/null
+                sudo pacman -S --noconfirm ${cmd/dig/bind-tools} ${cmd/nc/nc} >/dev/null
             else
                 print_status "error" "Nenhum gerenciador de pacotes suportado encontrado para $cmd."
                 exit 1
@@ -175,7 +172,7 @@ menu_inicial() {
     while true; do
         clear
         centralizar "=============================="
-        centralizar "      AUTORECON v1.2.4      "
+        centralizar "      AUTORECON v1.2.5      "
         centralizar "=============================="
         echo
         centralizar "1. Ativo"

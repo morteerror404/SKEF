@@ -73,3 +73,28 @@ print_clock_frame() {
             echo -e " ${GREEN}✔ $item_sanitized${NC}"
         elif [[ "$item_sanitized" == *"✗"* ]]; then
             echo -e " ${RED}✖ $item_sanitized${NC}"
+        elif [[ "$item_sanitized" == *"⚠"* ]]; then
+            echo -e " ${YELLOW}⚠ $item_sanitized${NC}"
+        else
+            echo -e " - $item_sanitized"
+        fi
+    done
+}
+
+loading_clock() {
+    local task="$1" duration=${2:-3}
+    local end_time=$((SECONDS + duration))
+    local pid
+    while [ $SECONDS -lt $end_time ]; do
+        print_clock_frame 1 "$task" &
+        pid=$!
+        sleep 0.3
+        kill -0 $pid 2>/dev/null && kill $pid
+        wait $pid 2>/dev/null
+        print_clock_frame 2 "$task" &
+        pid=$!
+        sleep 0.3
+        kill -0 $pid 2>/dev/null && kill $pid
+        wait $pid 2>/dev/null
+    done
+}

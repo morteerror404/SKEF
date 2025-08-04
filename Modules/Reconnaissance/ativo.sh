@@ -4,7 +4,7 @@
 # Função: Executar testes ativos (ping, portas, Nmap, FFUF) e retornar resultados para autorecon.sh
 # Dependências: utils.sh
 
-source ./utils.sh
+source "$(dirname "$0")/utils.sh"
 export -f determinar_protocolo
 
 #------------#------------# VARIÁVEIS GLOBAIS #------------#------------#
