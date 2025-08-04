@@ -198,8 +198,6 @@ Ativo_basico() {
     pid=$!
     [ -n "$TARGET_IPv4" ] && test_ping "$TARGET_IPv4" "IPv4"
     [ -n "$TARGET_IPv6" ] && test_ping "$TARGET_IPv6" "IPv6"
-    [ -n "$TARGET_IPv4" ] && test_ports "$TARGET_IPv4" "IPv4" 22 80 443
-    [ -n "$TARGET_IPv6" ] && test_ports "$TARGET_IPv6" "IPv6" 22 80 443
     [ "$TYPE_TARGET" = "DOMAIN" ] && test_http
     kill -0 $pid 2>/dev/null && kill $pid
     wait $pid 2>/dev/null

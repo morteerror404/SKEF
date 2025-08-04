@@ -54,6 +54,8 @@ centralizar() {
     printf "%*s%s\n" $espaco "" "$texto"
 }
 
+#------------#------------# FUNÇÕES GRÁFICAS #------------#------------#
+
 print_status() {
     local color="$1" message="$2"
     case "$color" in
@@ -116,6 +118,8 @@ loading_clock() {
     done
 }
 
+#------------#------------# FUNÇÕES AUXILIARES #------------#------------#
+
 verificar_tipo_alvo() {
     local entrada=$(echo "$1" | sed -E 's|^https?://||; s|/.*$||; s|:[0-9]+$||')
     if [[ $entrada =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
@@ -155,6 +159,7 @@ definir_alvo() {
 }
 
 #------------#------------# MENUS #------------#------------#
+
 menu_personalizado() {
     while true; do
         clear

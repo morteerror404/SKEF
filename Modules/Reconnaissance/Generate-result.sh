@@ -34,9 +34,9 @@ get_tool_config() {
     config+="- **Comandos IPv4**: $(printf '%s, ' "${NMAP_COMMANDS_IPV4[@]}" | sed 's/, $//')\n"
     config+="- **Comandos IPv6**: $(printf '%s, ' "${NMAP_COMMANDS_IPV6[@]}" | sed 's/, $//')\n\n"
     config+="### FFuf\n"
-    config+="- **Comandos de Subdomínios**: $(printf '%s, ' "${FFUF_COMMANDS[@]}" | sed 's/, $//')\n"
-    config+="- **Comandos Web**: $(printf '%s, ' "${FFUF_WEB_COMMANDS[@]}" | sed 's/, $//')\n"
-    config+="- **Comandos Extensões**: $(printf '%s, ' "${FFUF_EXT_COMMANDS[@]}" | sed 's/, $//')\n\n"
+    config+="- **Comandos de Subdomínios**: $(printf '%s, ' "${FFUF_SUBDOMAIN[@]}" | sed 's/, $//')\n"
+    config+="- **Comandos Web**: $(printf '%s, ' "${FFUF_DOMAINS[@]}" | sed 's/, $//')\n"
+    config+="- **Comandos Extensões**: $(printf '%s, ' "${FFUF_EXTENSIONS[@]}" | sed 's/, $//')\n\n"
     echo -e "$config"
 }
 
@@ -106,15 +106,15 @@ process_test_results() {
                 details="  - Comando: $cmd\n  - Arquivo de Resultados: ${results_file:-N/A}"
                 ;;
             "FFUF Subdomínios"*)
-                local cmd=$(sanitize_string "${FFUF_COMMANDS[*]}")
+                local cmd=$(sanitize_string "${FFUF_SUBDOMAIN[*]}")
                 details="  - Comando: $cmd\n  - Arquivo de Resultados: ffuf_subdomains.csv"
                 ;;
             "FFUF Web"*)
-                local cmd=$(sanitize_string "${FFUF_WEB_COMMANDS[*]}")
+                local cmd=$(sanitize_string "${FFUF_DOMAINS[*]}")
                 details="  - Comando: $cmd\n  - Arquivo de Resultados: ffuf_web.csv"
                 ;;
             "FFUF Extensões"*)
-                local cmd=$(sanitize_string "${FFUF_EXT_COMMANDS[*]}")
+                local cmd=$(sanitize_string "${FFUF_EXTENSIONS[*]}")
                 details="  - Comando: $cmd\n  - Arquivo de Resultados: ffuf_extensions.csv"
                 ;;
             "HTTP"*)
