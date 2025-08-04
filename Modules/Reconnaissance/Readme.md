@@ -7,49 +7,9 @@ Este módulo contém scripts para automação de tarefas de reconhecimento ativo
 ```mermaid
 
 flowchart TD
-    subgraph Módulo_Reconhecimento["Módulo de Reconhecimento"]
-        direction TB
-        A[autorecon.sh] -->|chama funções| B[ativo.sh]
-        A -->|gera dados| C[Generate-result.sh]
-        A & B & C -->|utilizam| D[utils.sh]
-    end
-
-    subgraph autorecon.sh["autorecon.sh (Controlador Principal)"]
-        direction TB
-        A1[Menu Inicial] --> A2[Recon. Ativo]
-        A1 --> A3[Menu Personalizado]
-        A2 -->|chama| A4[Ativo_basico]
-        A2 -->|chama| A5[Ativo_complexo]
-        A3 --> A6[Testes FFUF]
-        A3 --> A7[Testes Básicos]
-    end
-
-    subgraph ativo.sh["ativo.sh (Recon. Ativo)"]
-        direction TB
-        B1[Testes Ping/HTTP]
-        B2[Varreduras Nmap]
-        B3[Enumeração FFUF]
-        B4[Análise Resultados]
-    end
-
-    subgraph Generate_result.sh["Generate-result.sh (Relatórios)"]
-        direction LR
-        C1[Processa Resultados]
-        C2[Gera Markdown]
-        C3[Estatísticas]
-        C4[Limpeza Arquivos]
-    end
-
-    subgraph utils.sh["utils.sh (Utilitários)"]
-        direction LR
-        D1[Formatação Saída]
-        D2[Relógio Loading]
-        D3[Centralização Texto]
-        D4[Cores ANSI]
-    end
-
     User -->|executa| Módulo_Reconhecimento
     Módulo_Reconhecimento -->|gera| Relatório[Relatório Markdown]
+end
 ```
 
 ## Conteúdo do Módulo
@@ -62,6 +22,16 @@ flowchart TD
 ### `autorecon.sh`
 
 **Função:** Este é o script controlador principal do módulo de reconhecimento. Ele gerencia os menus de interação com o usuário, chama os testes de reconhecimento (ativos e, futuramente, passivos) e organiza os resultados para serem processados pelo `Generate-result.sh`.
+
+```mermaid
+flowchart TD
+    subgraph Módulo_Reconhecimento["Módulo de Reconhecimento"]
+        direction TB
+        A[autorecon.sh] -->|chama funções| B[ativo.sh]
+        A -->|gera dados| C[Generate-result.sh]
+        A & B & C -->|utilizam| D[utils.sh]
+    end
+```
 
 **Dependências:** `utils.sh`, `ativo.sh`, `Generate-result.sh`.
 
@@ -101,6 +71,17 @@ sudo ./autorecon.sh
 
 **Função:** Este script contém as funções responsáveis por executar os testes de reconhecimento ativo contra o alvo. Ele é chamado pelo `autorecon.sh` para realizar varreduras e coletas de informações de forma ativa.
 
+```mermaid
+flowchart TD
+    subgraph ativo.sh["ativo.sh (Recon. Ativo)"]
+        direction TB
+        B1[Testes Ping/HTTP]
+        B2[Varreduras Nmap]
+        B3[Enumeração FFUF]
+        B4[Análise Resultados]
+    end
+```
+
 **Dependências:** `utils.sh`.
 
 **Variáveis Globais:**
@@ -133,6 +114,16 @@ sudo ./autorecon.sh
 
 **Função:** Este script é responsável por processar todos os resultados coletados pelos testes de reconhecimento e gerar um relatório final em formato Markdown. Ele consolida as informações, adiciona metadados, configurações das ferramentas e estatísticas.
 
+```mermaid
+flowchart TD
+    subgraph Generate_result.sh["Generate-result.sh (Relatórios)"]
+        direction LR
+        C1[Processa Resultados]
+        C2[Gera Markdown]
+        C3[Estatísticas]
+        C4[Limpeza Arquivos]
+    end
+```
 **Dependências:** `utils.sh`, `ativo.sh`.
 
 **Funções Auxiliares:**
@@ -150,6 +141,17 @@ sudo ./autorecon.sh
 ### `utils.sh`
 
 **Função:** Este script contém funções utilitárias e de formatação de saída que são compartilhadas entre os outros scripts do módulo de Reconhecimento (`autorecon.sh`, `ativo.sh`, `Generate-result.sh`). Ele padroniza a exibição de mensagens e fornece ferramentas para melhorar a experiência do usuário no terminal.
+
+```mermaid
+flowchart TD
+    subgraph utils.sh["utils.sh (Utilitários)"]
+        direction LR
+        D1[Formatação Saída]
+        D2[Relógio Loading]
+        D3[Centralização Texto]
+        D4[Cores ANSI]
+    end
+```
 
 **Dependências:** Nenhuma dependência externa direta, mas utiliza variáveis globais definidas em `autorecon.sh` (como `TARGET`, `TYPE_TARGET`, `TARGET_IPv4`, `TARGET_IPv6`, `CHECKLIST`) para exibir informações no relógio de carregamento.
 
