@@ -113,12 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "docs/Exemplos.md",
+                "file": "docs/Arquitetura.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Links de saída para Exemplos"
+              "title": "Links de saída para Arquitetura"
             }
           },
           {
@@ -162,11 +162,12 @@
             }
           }
         ],
-        "currentTab": 4
+        "currentTab": 1
       }
     ],
     "direction": "horizontal",
-    "width": 300
+    "width": 300,
+    "collapsed": true
   },
   "left-ribbon": {
     "hiddenItems": {
@@ -179,7 +180,7 @@
       "obsidian-git:Open Git source control": false
     }
   },
-  "active": "9420607b8e21eb99",
+  "active": "fa91f6b0a78a3523",
   "lastOpenFiles": [
     "Todo/ToDo.md",
     "Todo/img/Dash Report - Menu.png",
