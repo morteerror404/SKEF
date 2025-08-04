@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Todo/ToDo.md",
+                "file": "docs/Arquitetura.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "ToDo"
+              "title": "Arquitetura"
             }
           }
         ]
@@ -150,13 +150,23 @@
               "icon": "lucide-list",
               "title": "Sumário de Exemplos"
             }
+          },
+          {
+            "id": "07954a101bbc2bdc",
+            "type": "leaf",
+            "state": {
+              "type": "git-view",
+              "state": {},
+              "icon": "git-pull-request",
+              "title": "Source Control"
+            }
           }
-        ]
+        ],
+        "currentTab": 4
       }
     ],
     "direction": "horizontal",
-    "width": 300,
-    "collapsed": true
+    "width": 300
   },
   "left-ribbon": {
     "hiddenItems": {
@@ -171,13 +181,13 @@
   },
   "active": "9420607b8e21eb99",
   "lastOpenFiles": [
+    "Todo/ToDo.md",
     "Todo/img/Dash Report - Menu.png",
     "Todo/img/Menu aberto.png",
     "Todo/img/Layout principal.png",
     "gitignore",
     "Todo/img",
     "Readme.md",
-    "Todo/ToDo.md",
     "Todo",
     "docs/Exemplos.md",
     "Modules/Web Dash",
