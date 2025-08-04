@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# utils.sh
+# Função: Funções compartilhadas entre scripts
+
+print_status() {
+    local color="$1" message="$2"
+    case "$color" in
+        "info") echo -e "${BLUE}[+] $message${NC}" ;;
+        "action") echo -e "${YELLOW}[▶] $message${NC}" ;;
+        "success") echo -e "${GREEN}[✔] $message${NC}" ;;
+        "error") echo -e "${RED}[✗] $message${NC}" ;;
+    esac
+}
+
+centralizar() {
+    local texto="$1"
+    local largura_terminal=$(tput cols)
+    local comprimento_texto=${#texto}
+    local espaco=$(( (largura_terminal - comprimento_texto) / 2 ))
+    printf "%*s%s\n" $espaco "" "$texto"
+}
+
+print_clock_frame() {
+    local frame=$1 task=$2 hora=$(date +"%H:%M:%S")
+    clear
+    echo -e "${BLUE}=== Target: ${CYAN}$TARGET ${BLUE}(${TYPE_TARGET}) ===${NC}"
+    [ -n "$TARGET_IPv4" ] && echo -e "${GREEN}IPv4: $TARGET_IPv4${NC}"
+    [ -n "$TARGET_IPv6" ] && echo -e "${GREEN}IPv6: $TARGET_IPv6${NC}"
+    echo -e "\n   ${PURPLE}______${NC}"
+    echo -e " ${PURPLE}/${YELLOW}________${PURPLE}\\${NC}"
+    echo -e " ${PURPLE}|${CYAN}$hora${PURPLE}|${NC}"
+    echo -e " ${PURPLE}|${YELLOW}________${PURPLE}|${NC}"
+    if [ "$frame" -eq 1 ]; then
+        echo -e " ${PURPLE}|${YELLOW}........${PURPLE}|${NC}"
+        echo -e " ${PURPLE}|${YELLOW}........${PURPLE}|${NC}"
+    else
+        echo -e " ${PURPLE}|${YELLOW}        ${PURPLE}|${NC}"
+        echo -e " ${PURPLE}|${YELLOW}        ${PURPLE}|${NC}"
+    fi
+    echo -e " ${PURPLE}\\ ${YELLOW}______${PURPLE} /${NC}"
+    echo -e "\n${WHITE}Executando: ${CYAN}$task${NC}"
+    echo -e "\n${GREEN}Checklist:${NC}"
+    for item in "${CHECKLIST[@]}"; do
+        item_sanitized=$(echo "$item" | sed 's/[^[:print:]]//g')
+        if [[ "$item_sanitized" == *"✓"* ]]; then
+            echo -e " ${GREEN}✔ $item_sanitized${NC}"
+        elif [[ "$item_sanitized" == *"✗"* ]]; then
+            echo -e " ${RED}✖ $item_sanitized${NC}"
+        elif [[ "$item_sanitized" == *"⚠"* ]]; then
+            echo -e " ${YELLOW}⚠ $item_sanitized${NC}"
+        else
+            echo -e " - $item_sanitized"
+        fi
+    done
+}
+
+loading_clock() {
+    local task="$1" duration=${2:-3}
+    local end_time=$((SECONDS + duration))
+    local pid
+    while [ $SECONDS -lt $end_time ]; do
+        print_clock_frame 1 "$task" &
+        pid=$!
+        sleep 0.3
+        kill -0 $pid 2>/dev/null && kill $pid
+        wait $pid 2>/dev/null
+        print_clock_frame 2 "$task" &
+        pid=$!
+        sleep 0.3
+        kill -0 $pid 2>/dev/null && kill $pid
+        wait $pid 2>/dev/null
+    done
+}
