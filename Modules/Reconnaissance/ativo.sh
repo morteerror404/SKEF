@@ -1,9 +1,13 @@
 #!/bin/bash
 
+# ativo.sh
+# Função: Executar testes ativos (ping, portas, Nmap, FFUF, dig, traceroute, curl) e retornar resultados para autorecon.sh
+
+# Exportar funções para uso em outros scripts
+export -f determinar_protocolo
+
 #------------#------------# VARIÁVEIS GLOBAIS #------------#------------#
-# Variáveis globais são definidas em autorecon.sh e acessadas aqui
 WORDLISTS_DIR="$HOME/wordlists"
-NMAP_SILENCE="-Pn"
 declare -A PORT_STATUS_IPV4
 declare -A PORT_STATUS_IPV6
 declare -A PORT_TESTS_IPV4
@@ -12,20 +16,23 @@ RESULTS_DIR="results"
 
 #------------#------------# VARIÁVEIS COMANDOS #------------#------------#
 NMAP_COMMANDS_IPV4=(
-    "nmap {TARGET_IP} --top-ports 100 -T4 -v {NMAP_SILENCE}"
-    "nmap {TARGET_IP} -vv -O {NMAP_SILENCE}"
-    "nmap {TARGET_IP} -sV -O -vv {NMAP_SILENCE}"
+    "nmap {TARGET_IP} -sT -vv -Pn"
+    "nmap {TARGET_IP} -vv -O -Pn"
+    "nmap {TARGET_IP} -sV -O -vv -Pn"
 )
 NMAP_COMMANDS_IPV6=(
-    "nmap -6 {TARGET_IP} --top-ports 100 -T4 -v {NMAP_SILENCE}"
-    "nmap -6 {TARGET_IP} -vv -O {NMAP_SILENCE}"
-    "nmap -6 {TARGET_IP} -sV -O -vv {NMAP_SILENCE}"
+    "nmap -6 {TARGET_IP} -sT -vv -Pn"
+    "nmap -6 {TARGET_IP} -vv -O -Pn"
+    "nmap -6 {TARGET_IP} -sV -O -vv -Pn"
 )
-FFUF_COMMANDS=(
-    "ffuf -u {URL}/ -H \"Host: FUZZ.{TARGET}\" -w {WORDLIST_SUBDOMAINS} -mc 200,301,302 -o $RESULTS_DIR/ffuf_output.csv -of csv"
+FFUF_SUBDOMAIN=(
+    "ffuf -u {URL}/ -H \"Host: FUZZ.{TARGET}\" -w {WORDLIST_SUBDOMAINS} -mc 200,301,302 -o $RESULTS_DIR/ffuf_subdomains.csv -of csv"
 )
-FFUF_WEB_COMMANDS=(
-    "ffuf -u {URL}/FUZZ -w {WORDLIST_WEB} -mc 200,301,302 -o $RESULTS_DIR/ffuf_web_output.csv -of csv"
+FFUF_DOMAINS=(
+    "ffuf -u {URL}/FUZZ -w {WORDLIST_WEB} -mc 200,301,302 -o $RESULTS_DIR/ffuf_web.csv -of csv"
+)
+FFUF_EXTENSIONS=(
+    "ffuf -u {URL}/index.FUZZ -w $WORDLISTS_DIR/SecLists/Discovery/Web-Content/web-extensions.txt -mc 200,301,302 -o $RESULTS_DIR/ffuf_extensions.csv -of csv"
 )
 
 #------------#------------# FUNÇÕES AUXILIARES #------------#------------#
@@ -42,7 +49,8 @@ substituir_variaveis() {
     [ ! -f "$wordlist_subdomains" ] && { wordlist_subdomains="/tmp/subdomains.txt"; curl -s https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-5000.txt -o "$wordlist_subdomains"; }
     [ ! -f "$wordlist_web" ] && { wordlist_web="/tmp/common.txt"; curl -s https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -o "$wordlist_web"; }
     local protocol=$(determinar_protocolo)
-    echo "$cmd" | sed "s/{TARGET}/$TARGET/g; s/{TARGET_IP}/$ip/g; s/{PROTOCOL}/$protocol/g; s|{WORDLIST_SUBDOMAINS}|$wordlist_subdomains|g; s|{WORDLIST_WEB}|$wordlist_web|g"
+    local url="$protocol://$ip"
+    echo "$cmd" | sed "s/{TARGET}/$TARGET/g; s/{TARGET_IP}/$ip/g; s/{URL}/$url/g; s|{WORDLIST_SUBDOMAINS}|$wordlist_subdomains|g; s|{WORDLIST_WEB}|$wordlist_web|g"
 }
 
 executar_comando() {
@@ -51,11 +59,11 @@ executar_comando() {
     local temp_output=$(mktemp)
     if $cmd >"$temp_output" 2>&1; then
         local results=$(wc -l < "$temp_output")
-        [ "$results" -gt 0 ] && CHECKLIST+=("$name: ✓ $success_msg $results") || CHECKLIST+=("$name: ✓ $fail_msg")
+        [ "$results" -gt 0 ] && CHECKLIST+=("$name: ✓ $success_msg ($results linhas)") || CHECKLIST+=("$name: ✓ $fail_msg")
     else
         CHECKLIST+=("$name: ✗ Falha")
     fi
-    mv "$temp_output" "$output_file"
+    mv "$temp_output" "$output_file" 2>>"$RESULTS_DIR/error.log"
 }
 
 analyze_nmap_results() {
@@ -90,7 +98,7 @@ consolidar_portas() {
         elif [ $closed_count -eq $total_tests ]; then
             CHECKLIST+=("Porta $port ($ip_version): ✗ Fechada")
         else
-            CHECKLIST+=("Porta $port ($ip_version): ⚠ Filtrada ($open_count aberta & $closed_count fechada & $filtered_count filtrada)")
+            CHECKLIST+=("Porta $port ($ip_version): ⚠ Filtrada ($open_count aberta, $closed_count fechada, $filtered_count filtrada)")
         fi
     done
 }
@@ -114,37 +122,73 @@ test_ping() {
     wait $pid 2>/dev/null
 }
 
-test_ports() {
-    local ip="$1" version="$2" ports=("${@:3}")
-    for port in "${ports[@]}"; do
-        print_status "action" "Testando Porta $port ($version)"
-        loading_clock "Testando Porta $port ($version)" 2 &
-        pid=$!
-        if nc -zv -w 2 "$ip" $port &>/dev/null; then
-            CHECKLIST+=("Porta $port ($version): ✓ Aberta")
-        else
-            CHECKLIST+=("Porta $port ($version): ✗ Fechada")
-        fi
-        kill -0 $pid 2>/dev/null && kill $pid
-        wait $pid 2>/dev/null
-    done
+test_dig() {
+    print_status "action" "Executando teste DNS com dig"
+    local output_file="$RESULTS_DIR/dig_output.txt"
+    local dig_result=$(dig "$TARGET" ANY +short >"$output_file" 2>&1)
+    if [ $? -eq 0 ]; then
+        local resolved_ips=$(cat "$output_file" | grep -oP '(\d+\.\d+\.\d+\.\d+|[:0-9a-fA-F]+)' | tr '\n' ',' | sed 's/,$//')
+        [ -n "$resolved_ips" ] && CHECKLIST+=("DNS: ✓ IPs resolvidos ($resolved_ips)") || CHECKLIST+=("DNS: ✗ Nenhum IP resolvido")
+    else
+        CHECKLIST+=("DNS: ✗ Falha")
+    fi
 }
 
-test_http() {
-    if [ "$TYPE_TARGET" = "DOMAIN" ]; then
-        local protocol=$(determinar_protocolo)
-        loading_clock "Teste HTTP ($protocol)" 3 &
-        pid=$!
-        http_code=$(curl -sI "$protocol://$TARGET" | head -1 | cut -d' ' -f2)
-        if [ -n "$http_code" ]; then
-            CHECKLIST+=("HTTP ($protocol): ✓ Código $http_code")
-        else
-            CHECKLIST+=("HTTP ($protocol): ✗ Falha")
-        fi
-        kill -0 $pid 2>/dev/null && kill $pid
-        wait $pid 2>/dev/null
+test_traceroute() {
+    print_status "action" "Executando traceroute"
+    local output_file="$RESULTS_DIR/traceroute_output.txt"
+    local traceroute_cmd="traceroute $TARGET_IPv4" && [ -n "$TARGET_IPv6" ] && traceroute_cmd="traceroute6 $TARGET_IPv6"
+    local traceroute_result=$($traceroute_cmd >"$output_file" 2>&1)
+    if [ $? -eq 0 ]; then
+        CHECKLIST+=("Traceroute: ✓ Sucesso")
     else
-        CHECKLIST+=("HTTP: ✗ Teste requer domínio")
+        CHECKLIST+=("Traceroute: ✗ Falha")
+    fi
+}
+
+test_curl_headers() {
+    print_status "action" "Verificando headers HTTP com curl"
+    local output_file="$RESULTS_DIR/curl_headers.txt"
+    local protocol=$(determinar_protocolo)
+    local curl_result=$(curl -sI "$protocol://$TARGET" >"$output_file" 2>&1)
+    if [ $? -eq 0 ]; then
+        local http_code=$(head -1 "$output_file" | cut -d' ' -f2)
+        CHECKLIST+=("HTTP Headers ($protocol): ✓ Código $http_code")
+    else
+        CHECKLIST+=("HTTP Headers ($protocol): ✗ Falha")
+    fi
+}
+
+test_ffuf_subdomains() {
+    if [ "$TYPE_TARGET" = "DOMAIN" ]; then
+        for cmd in "${FFUF_SUBDOMAIN[@]}"; do
+            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
+            executar_comando "$cmd_substituido" "FFUF Subdomínios" "$RESULTS_DIR/ffuf_subdomains.csv" "Subdomínios encontrados" "Nenhum subdomínio encontrado"
+        done
+    else
+        CHECKLIST+=("FFUF Subdomínios: ✗ Teste requer domínio")
+    fi
+}
+
+test_ffuf_directories() {
+    if [ "$TYPE_TARGET" = "DOMAIN" ]; then
+        for cmd in "${FFUF_DOMAINS[@]}"; do
+            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
+            executar_comando "$cmd_substituido" "FFUF Web" "$RESULTS_DIR/ffuf_web.csv" "Recursos web encontrados" "Nenhum recurso web encontrado"
+        done
+    else
+        CHECKLIST+=("FFUF Web: ✗ Teste requer domínio")
+    fi
+}
+
+test_ffuf_extensions() {
+    if [ "$TYPE_TARGET" = "DOMAIN" ]; then
+        for cmd in "${FFUF_EXTENSIONS[@]}"; do
+            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
+            executar_comando "$cmd_substituido" "FFUF Extensões" "$RESULTS_DIR/ffuf_extensions.csv" "Extensões encontradas" "Nenhuma extensão encontrada"
+        done
+    else
+        CHECKLIST+=("FFUF Extensões: ✗ Teste requer domínio")
     fi
 }
 
@@ -156,16 +200,18 @@ Ativo_basico() {
     [ -n "$TARGET_IPv6" ] && test_ping "$TARGET_IPv6" "IPv6"
     [ -n "$TARGET_IPv4" ] && test_ports "$TARGET_IPv4" "IPv4" 22 80 443
     [ -n "$TARGET_IPv6" ] && test_ports "$TARGET_IPv6" "IPv6" 22 80 443
+    [ "$TYPE_TARGET" = "DOMAIN" ] && test_http
     kill -0 $pid 2>/dev/null && kill $pid
     wait $pid 2>/dev/null
 }
 
 Ativo_complexo() {
     print_status "info" "Executando testes ATIVOS COMPLEXOS em $TARGET"
+    mkdir -p "$RESULTS_DIR"
     if [ -n "$TARGET_IPv4" ]; then
         for cmd in "${NMAP_COMMANDS_IPV4[@]}"; do
             local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
-            local output_file="$RESULTS_DIR/nmap_$(echo "$cmd" | tr ' ' '_' | tr -d '{}').xml"
+            local output_file="$RESULTS_DIR/nmap_ipv4_$(echo "$cmd" | tr ' ' '_' | tr -d '{}').xml"
             executar_comando "$cmd_substituido -oX $output_file" "Nmap IPv4" "$output_file" "Portas escaneadas" "Nenhuma porta encontrada"
             analyze_nmap_results "$output_file" "IPv4"
         done
@@ -174,20 +220,13 @@ Ativo_complexo() {
     if [ -n "$TARGET_IPv6" ]; then
         for cmd in "${NMAP_COMMANDS_IPV6[@]}"; do
             local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv6")
-            local output_file="$RESULTS_DIR/nmap_$(echo "$cmd" | tr ' ' '_' | tr -d '{}').xml"
+            local output_file="$RESULTS_DIR/nmap_ipv6_$(echo "$cmd" | tr ' ' '_' | tr -d '{}').xml"
             executar_comando "$cmd_substituido -oX $output_file" "Nmap IPv6" "$output_file" "Portas escaneadas" "Nenhuma porta encontrada"
             analyze_nmap_results "$output_file" "IPv6"
         done
         consolidar_portas "IPv6"
     fi
-    if [ "$TYPE_TARGET" = "DOMAIN" ]; then
-        for cmd in "${FFUF_COMMANDS[@]}"; do
-            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
-            executar_comando "$cmd_substituido" "FFUF Subdomínios" "$RESULTS_DIR/ffuf_output.csv" "Subdomínios encontrados" "Nenhum subdomínio encontrado"
-        done
-        for cmd in "${FFUF_WEB_COMMANDS[@]}"; do
-            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
-            executar_comando "$cmd_substituido" "FFUF Web" "$RESULTS_DIR/ffuf_web_output.csv" "Recursos web encontrados" "Nenhum recurso web encontrado"
-        done
-    fi
+    [ "$TYPE_TARGET" = "DOMAIN" ] && test_ffuf_subdomains
+    [ "$TYPE_TARGET" = "DOMAIN" ] && test_ffuf_directories
+    [ "$TYPE_TARGET" = "DOMAIN" ] && test_ffuf_extensions
 }

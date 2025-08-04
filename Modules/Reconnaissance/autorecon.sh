@@ -1,12 +1,13 @@
 #!/bin/bash
 
-# Carrega os arquivos JSON.sh, passivo.sh e ativo.sh
-source ./JSON.sh
-source ./passivo.sh
+# autorecon.sh
+# Função: Controlador principal, gerencia menus, chama testes e organiza resultados para Generate-result.sh
+
+# Carrega os scripts de teste
 source ./ativo.sh
+# source ./passivo.sh  # Descomentar quando passivo.sh estiver implementado
 
 #------------#------------# VARIÁVEIS GLOBAIS #------------#------------#
-ASK=""
 TARGET=""
 TARGET_IPv4=""
 TARGET_IPv6=""
@@ -161,64 +162,35 @@ menu_personalizado() {
         centralizar " Menu de Ferramentas de Rede "
         centralizar "=============================="
         echo
-        centralizar "1. Teste de Ping"
-        centralizar "2. Teste DNS"
-        centralizar "3. Teste de Portas"
-        centralizar "4. Teste HTTP"
-        centralizar "5. Use o FFUF"
-        centralizar "6. Teste Passivo Completo"
-        centralizar "7. Teste Ativo Completo"
+        centralizar "------ FFUF Enumeration ------"
+        centralizar "1. Enumeração de Subdomínios"
+        centralizar "2. Enumeração de Diretórios"
+        centralizar "3. Enumeração de Extensões de Arquivos"
+        echo
+        centralizar "------ Testes Básicos -------"
+        centralizar "4. Teste de Ping"
+        centralizar "5. Teste DNS (dig)"
+        centralizar "6. Traceroute"
+        centralizar "7. Verificar Headers HTTP (curl)"
+        echo
         centralizar "8. Voltar ao menu principal"
         echo
         read -p "[+] Escolha uma opção (1-8): " OPCAO
         case $OPCAO in
-            1)
+            1|2|3|4|5|6|7)
                 [ -z "$TARGET" ] && definir_alvo
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                [ -n "$TARGET_IPv4" ] && test_ping "$TARGET_IPv4" "IPv4"
-                [ -n "$TARGET_IPv6" ] && test_ping "$TARGET_IPv6" "IPv6"
-                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
-                ;;
-            2)
-                [ -z "$TARGET" ] && definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                [ "$TYPE_TARGET" = "DOMAIN" ] && test_dns
-                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
-                ;;
-            3)
-                [ -z "$TARGET" ] && definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                read -p "Digite as portas a testar (ex: 22,80,443): " PORTS
-                IFS=',' read -ra PORT_ARRAY <<< "$PORTS"
-                [ -n "$TARGET_IPv4" ] && test_ports "$TARGET_IPv4" "IPv4" "${PORT_ARRAY[@]}"
-                [ -n "$TARGET_IPv6" ] && test_ports "$TARGET_IPv6" "IPv6" "${PORT_ARRAY[@]}"
-                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
-                ;;
-            4)
-                [ -z "$TARGET" ] && definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                test_http
-                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
-                ;;
-            5)
-                [ -z "$TARGET" ] && definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                test_whois
-                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
-                ;;
-            6)
-                [ -z "$TARGET" ] && definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                Passivo_basico
-                Passivo_complexo
-                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
-                ;;
-            7)
-                [ -z "$TARGET" ] && definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                Ativo_basico
-                Ativo_complexo
-                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
+                case $OPCAO in
+                    1) test_ffuf_subdomains ;;
+                    2) test_ffuf_directories ;;
+                    3) test_ffuf_extensions ;;
+                    4) test_ping "$TARGET_IPv4" "IPv4"; [ -n "$TARGET_IPv6" ] && test_ping "$TARGET_IPv6" "IPv6" ;;
+                    5) test_dig ;;
+                    6) test_traceroute ;;
+                    7) test_curl_headers ;;
+                esac
+                source ./Generate-result.sh
+                save_report
                 ;;
             8) break ;;
             *) print_status "error" "Opção inválida" ;;
@@ -227,67 +199,46 @@ menu_personalizado() {
 }
 
 menu_inicial() {
-    if ! command -v jq &>/dev/null; then
-        print_status "info" "Instalando jq..."
-        sudo apt-get install -y jq >/dev/null || sudo yum install -y jq >/dev/null
-    fi
-    if ! command -v dig &>/dev/null; then
-        print_status "info" "Instalando dnsutils..."
-        sudo apt-get install -y dnsutils >/dev/null || sudo yum install -y bind-utils >/dev/null
-    fi
+    # Instalar dependências
+    for cmd in jq dig; do
+        if ! command -v $cmd &>/dev/null; then
+            print_status "info" "Instalando $cmd..."
+            if command -v apt-get &>/dev/null; then
+                sudo apt-get install -y ${cmd/dig/dnsutils} >/dev/null
+            elif command -v yum &>/dev/null; then
+                sudo yum install -y ${cmd/dig/bind-utils} >/dev/null
+            else
+                print_status "error" "Nenhum gerenciador de pacotes suportado encontrado."
+                exit 1
+            fi
+        fi
+    done
+
     while true; do
         clear
         centralizar "=============================="
         centralizar "      AUTORECON v1.2.4      "
         centralizar "=============================="
         echo
-        centralizar "1. Passivo + Ativo"
-        centralizar "2. Ativo + Passivo"
-        centralizar "3. Passivo"
-        centralizar "4. Ativo"
-        centralizar "5. Personalizado"
-        centralizar "6. Sair"
+        centralizar "1. Ativo"
+        centralizar "2. Personalizado"
+        centralizar "3. Sair"
         echo
-        read -p "[+] Escolha uma estratégia (1-6): " estrategia
+        read -p "[+] Escolha uma estratégia (1-3): " estrategia
         case $estrategia in
             1)
                 definir_alvo
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                print_status "action" "Executando Reconhecimento Passivo..."
-                Passivo_basico
-                Passivo_complexo
                 print_status "action" "Executando Reconhecimento Ativo..."
                 Ativo_basico
                 Ativo_complexo
-                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
+                source ./Generate-result.sh
+                save_report
                 ;;
             2)
-                definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                print_status "action" "Executando Reconhecimento Ativo..."
-                Ativo_basico
-                Ativo_complexo
-                print_status "action" "Executando Reconhecimento Passivo..."
-                Passivo_basico
-                Passivo_complexo
-                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
+                menu_personalizado
                 ;;
-            3)
-                definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                Passivo_basico
-                Passivo_complexo
-                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
-                ;;
-            4)
-                definir_alvo
-                [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
-                Ativo_basico
-                Ativo_complexo
-                [ ${#CHECKLIST[@]} -gt 0 ] && salvar_json
-                ;;
-            5) menu_personalizado ;;
-            6) print_status "info" "Saindo..."; exit 0 ;;
+            3) print_status "info" "Saindo..."; exit 0 ;;
             *) print_status "error" "Opção inválida" ;;
         esac
     done

@@ -302,12 +302,74 @@ setup_wordlists() {
         echo -e "\n\033[36mConsidere adicionar ao seu PATH:\033[0m"
         echo "echo 'export PATH=\"\$PATH:$wordlists_dir\"' >> ~/.bashrc"
     fi
+
+    # Atualizar config-SKEF.json com o diretório de wordlists
+    update_config_json "wordlists_dir" "$wordlists_dir"
+}
+
+# Nova função para gerenciar config-SKEF.json
+update_config_json() {
+    local key="$1"
+    local value="$2"
+    local config_file="config-SKEF.json"
+    local temp_file="config-SKEF.json.tmp"
+    local timestamp=$(date +%Y-%m-%dT%H:%M:%S)
+
+    if [[ ! -w "$(pwd)" ]]; then
+        echo -e "\033[31mErro: Sem permissão para escrever em $(pwd).\033[0m"
+        return 1
+    fi
+
+    if [[ ! -f "$config_file" ]]; then
+        echo -e "\033[33mCriando novo arquivo $config_file...\033[0m"
+        cat > "$config_file" <<EOL
+{
+  "wordlists_dir": "",
+  "installed_tools": [],
+  "user_options": [],
+  "last_updated": "$timestamp"
+}
+EOL
+    fi
+
+    # Ler o conteúdo atual do JSON
+    if ! command -v jq &> /dev/null; then
+        echo -e "\033[31mErro: 'jq' não está instalado. Instale-o para manipular JSON.\033[0m"
+        echo -e "\033[34mTentando instalar 'jq' com '$CMD_PACK_MANAGER_INSTALL jq'...\033[0m"
+        if $CMD_PACK_MANAGER_INSTALL jq &>> "$log_file"; then
+            echo -e "\033[32m[√] 'jq' instalado com sucesso!\033[0m"
+        else
+            echo -e "\033[31mErro: Falha ao instalar 'jq'. Instale manualmente.\033[0m"
+            return 1
+        fi
+    fi
+
+    if [[ "$key" == "wordlists_dir" ]]; then
+        jq --arg key "$key" --arg value "$value" --arg ts "$timestamp" \
+           '. + {($key): $value, "last_updated": $ts}' "$config_file" > "$temp_file"
+    elif [[ "$key" == "installed_tools" ]]; then
+        jq --arg tool "$value" --arg ts "$timestamp" \
+           '.installed_tools += [$tool] | .last_updated = $ts' "$config_file" > "$temp_file"
+    elif [[ "$key" == "user_options" ]]; then
+        jq --arg opt "$value" --arg ts "$timestamp" \
+           '.user_options += [$opt] | .last_updated = $ts' "$config_file" > "$temp_file"
+    fi
+
+    mv "$temp_file" "$config_file" && {
+        echo -e "\033[32m[√] Arquivo $config_file atualizado com $key.\033[0m"
+    } || {
+        echo -e "\033[31m[!] Falha ao atualizar $config_file.\033[0m"
+        return 1
+    }
 }
 
 install_tools() {
     local timestamp=$(date +%Y%m%d_%H%M%S)
     local log_file="$HOME/install_tools_${timestamp}.log"
     local requirements_file="requirements.txt"
+    
+    # Adicionar opção do usuário ao config-SKEF.json
+    update_config_json "user_options" "Usuário escolheu instalar ferramentas de recon ativo"
     
     echo -e "\033[34m[+] Instalando ferramentas de segurança a partir de $requirements_file...\033[0m" | tee -a "$log_file"
 
@@ -322,11 +384,8 @@ attacksurfacemapper
 autorecon
 gitleaks
 sherlock-project
-xray
 fierce
 finalrecon
-firewalk
-clusterd
 git
 go
 EOL
@@ -341,11 +400,7 @@ EOL
         ["autorecon"]="pip:autorecon"
         ["gitleaks"]="go:github.com/zricethezav/gitleaks/v8@latest"
         ["sherlock-project"]="pip:sherlock-project"
-        ["xray"]="manual:https://github.com/evilsocket/xray/releases"
-        ["fierce"]="pip:fierce"
         ["finalrecon"]="pip:finalrecon"
-        ["firewalk"]="manual:https://github.com/0x90/firewalk"
-        ["clusterd"]="pip:clusterd"
         ["git"]="package"
         ["go"]="package"
         ["python3"]="package"
@@ -390,6 +445,7 @@ EOL
                 loading_animation $! "Instalando $tool"
                 if command -v "$tool" &>/dev/null; then
                     echo -e "\033[32m[√] $tool instalado com sucesso!\033[0m" | tee -a "$log_file"
+                    update_config_json "installed_tools" "$tool"
                 else
                     echo -e "\033[31m[!] Falha ao instalar $tool com $CMD_PACK_MANAGER_NAME.\033[0m" | tee -a "$log_file"
                 fi
@@ -400,6 +456,7 @@ EOL
                 loading_animation $! "Instalando $tool"
                 if python3 -m pip show "$tool" &>/dev/null; then
                     echo -e "\033[32m[√] $tool instalado com sucesso!\033[0m" | tee -a "$log_file"
+                    update_config_json "installed_tools" "$tool"
                 else
                     echo -e "\033[31m[!] Falha ao instalar $tool com pip.\033[0m" | tee -a "$log_file"
                 fi
@@ -415,6 +472,7 @@ EOL
                 loading_animation $! "Instalando $tool"
                 if command -v "$tool" &>/dev/null; then
                     echo -e "\033[32m[√] $tool instalado com sucesso!\033[0m" | tee -a "$log_file"
+                    update_config_json "installed_tools" "$tool"
                 else
                     echo -e "\033[31m[!] Falha ao instalar $tool com go install.\033[0m" | tee -a "$log_file"
                 fi
