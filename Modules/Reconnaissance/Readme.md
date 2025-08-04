@@ -2,15 +2,62 @@
 
 Este módulo contém scripts para automação de tarefas de reconhecimento ativo e passivo, focando na coleta de informações sobre alvos para testes de penetração.
 
+## Data-Flow 
+
+```mermaid
+
+flowchart TD
+    subgraph Módulo_Reconhecimento["Módulo de Reconhecimento"]
+        direction TB
+        A[autorecon.sh] -->|chama funções| B[ativo.sh]
+        A -->|gera dados| C[Generate-result.sh]
+        A & B & C -->|utilizam| D[utils.sh]
+    end
+
+    subgraph autorecon.sh["autorecon.sh (Controlador Principal)"]
+        direction TB
+        A1[Menu Inicial] --> A2[Recon. Ativo]
+        A1 --> A3[Menu Personalizado]
+        A2 -->|chama| A4[Ativo_basico]
+        A2 -->|chama| A5[Ativo_complexo]
+        A3 --> A6[Testes FFUF]
+        A3 --> A7[Testes Básicos]
+    end
+
+    subgraph ativo.sh["ativo.sh (Recon. Ativo)"]
+        direction TB
+        B1[Testes Ping/HTTP]
+        B2[Varreduras Nmap]
+        B3[Enumeração FFUF]
+        B4[Análise Resultados]
+    end
+
+    subgraph Generate_result.sh["Generate-result.sh (Relatórios)"]
+        direction LR
+        C1[Processa Resultados]
+        C2[Gera Markdown]
+        C3[Estatísticas]
+        C4[Limpeza Arquivos]
+    end
+
+    subgraph utils.sh["utils.sh (Utilitários)"]
+        direction LR
+        D1[Formatação Saída]
+        D2[Relógio Loading]
+        D3[Centralização Texto]
+        D4[Cores ANSI]
+    end
+
+    User -->|executa| Módulo_Reconhecimento
+    Módulo_Reconhecimento -->|gera| Relatório[Relatório Markdown]
+```
+
 ## Conteúdo do Módulo
 
 - `autorecon.sh`: Script principal para orquestrar o reconhecimento.
 - `ativo.sh`: Contém funções para execução de testes de reconhecimento ativo.
 - `Generate-result.sh`: Responsável por processar os resultados e gerar relatórios.
 - `utils.sh`: Fornece funções utilitárias e de formatação de saída.
-
-
-
 
 ### `autorecon.sh`
 
@@ -50,9 +97,6 @@ O script deve ser executado com privilégios de root. Ele apresentará um menu i
 sudo ./autorecon.sh
 ```
 
-
-
-
 ### `ativo.sh`
 
 **Função:** Este script contém as funções responsáveis por executar os testes de reconhecimento ativo contra o alvo. Ele é chamado pelo `autorecon.sh` para realizar varreduras e coletas de informações de forma ativa.
@@ -85,9 +129,6 @@ sudo ./autorecon.sh
 - `Ativo_basico()`: Agrupa testes ativos básicos (ping, HTTP).
 - `Ativo_complexo()`: Agrupa testes ativos mais complexos (Nmap, FFUF para subdomínios, diretórios e extensões).
 
-
-
-
 ### `Generate-result.sh`
 
 **Função:** Este script é responsável por processar todos os resultados coletados pelos testes de reconhecimento e gerar um relatório final em formato Markdown. Ele consolida as informações, adiciona metadados, configurações das ferramentas e estatísticas.
@@ -105,9 +146,6 @@ sudo ./autorecon.sh
 - `process_result_files()`: Incorpora o conteúdo de arquivos de resultados (txt, csv, xml) gerados pelos testes no relatório final, formatando-os adequadamente.
 - `generate_statistics()`: Calcula e adiciona estatísticas gerais ao relatório, como total de testes, testes bem-sucedidos, testes com falha e tempo total de execução.
 - `save_report()`: Função principal que orquestra a geração do relatório, chamando as funções auxiliares para coletar metadados, processar resultados, incorporar arquivos e gerar estatísticas. Também configura um manipulador de interrupção para limpeza de arquivos.
-
-
-
 
 ### `utils.sh`
 
