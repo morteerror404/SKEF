@@ -8,7 +8,7 @@ source "$(dirname "$0")/utils.sh"
 export -f determinar_protocolo
 
 #------------#------------# VARIÁVEIS GLOBAIS #------------#------------#
-WORDLISTS_DIR="$HOME/wordlists"
+WORDLISTS_DIR="/home/wordlists"
 declare -A PORT_STATUS_IPV4
 declare -A PORT_STATUS_IPV6
 declare -A PORT_TESTS_IPV4
