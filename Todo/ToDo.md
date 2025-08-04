@@ -1,7 +1,11 @@
 ## Ferramentas
 
-- [ ] - Testar o Auto recon
+- [ x ] - Testar o Auto recon
 - [ x ] - Separa o Ativo do Passivo
+- [ ] - resolver problemas do ffuf
+- [ ] - resolver problemas do relatório.md 
+- [ ] - resolver problemas adicionar funcionalidade de relatorio-old.md
+- [ ] - resolver problemas da instalação de ferramentas
 - [ ] - Pesquisar novas ferramentas para recon
 - [ ] - Ferramenta de teste de Input
 - [ ] - Ferramenta para teste de cache, header e metadata. 

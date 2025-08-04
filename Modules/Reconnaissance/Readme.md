@@ -1,91 +1,125 @@
+# Módulo de Reconhecimento
+
+Este módulo contém scripts para automação de tarefas de reconhecimento ativo e passivo, focando na coleta de informações sobre alvos para testes de penetração.
+
+## Conteúdo do Módulo
+
+- `autorecon.sh`: Script principal para orquestrar o reconhecimento.
+- `ativo.sh`: Contém funções para execução de testes de reconhecimento ativo.
+- `Generate-result.sh`: Responsável por processar os resultados e gerar relatórios.
+- `utils.sh`: Fornece funções utilitárias e de formatação de saída.
 
 
-# Script AutoRecon
 
-Este é um script em Bash baseado na ferramenta AutoRecon, projetado para automatizar tarefas de reconhecimento ativo e passivo em sistemas Linux. **O script está atualmente em produção**, com foco no recon ativo como a única funcionalidade totalmente funcional. Recursos passivos e outras funcionalidades estão em desenvolvimento ou simulados.
 
-## Pré-requisitos
+### `autorecon.sh`
 
-- Um sistema operacional baseado em Linux (ex.: Ubuntu, Debian, Kali).
-- Python 3 e `pip` instalados.
-- Ferramentas como `nmap`, `ffuf`, `autorecon`, `gitleaks`, `sherlock`, `xray`, `fierce`, `finalrecon`, `firewalk` e `clusterd` instaladas (consulte `requirements.txt` ou instale manualmente).
-- Privilégios de `sudo` para execução de comandos de rede.
-- Dependências adicionais: `jq` (para salvar resultados em JSON) e `dnsutils` (para DNS).
-- Conexão com a internet para acessar alvos e wordlists.
+**Função:** Este é o script controlador principal do módulo de reconhecimento. Ele gerencia os menus de interação com o usuário, chama os testes de reconhecimento (ativos e, futuramente, passivos) e organiza os resultados para serem processados pelo `Generate-result.sh`.
 
-## Instalação
+**Dependências:** `utils.sh`, `ativo.sh`, `Generate-result.sh`.
 
-1. **Clone o Repositório** (se aplicável):
-   ```bash
-   git clone <url-do-repositório>
-   cd <diretório-do-repositório>
-   ```
+**Variáveis Globais:**
+- `TARGET`: O IP, domínio ou URL alvo definido pelo usuário.
+- `TARGET_IPv4`: O endereço IPv4 resolvido do alvo.
+- `TARGET_IPv6`: O endereço IPv6 resolvido do alvo.
+- `TYPE_TARGET`: O tipo de alvo (IP ou DOMAIN).
+- `CHECKLIST`: Um array para armazenar o status de cada teste executado.
+- `START_TIME`: O timestamp de início da execução do script.
+- `RESULTS_DIR`: O diretório onde os resultados serão salvos (padrão: `results`).
+- `CLEAN_RESULTS`: Opção para ativar/desativar a limpeza automática de arquivos residuais (`yes`/`no`).
 
-2. **Instale as Dependências**:
-   - Instale as ferramentas listadas em `requirements.txt` ou manualmente:
-     ```bash
-     sudo apt-get update
-     sudo apt-get install -y nmap jq dnsutils
-     pip install autorecon attacksurfacemapper sherlock-project fierce finalrecon clusterd
-     go install github.com/ffuf/ffuf/v2@latest
-     go install github.com/zricethezav/gitleaks/v8@latest
-     ```
-   - Wordlists serão baixadas automaticamente (ex.: SecLists).
+**Funções Auxiliares:**
+- `validar_root()`: Verifica se o script está sendo executado com privilégios de root.
+- `clean_results()`: Limpa os arquivos residuais no diretório de resultados, se `CLEAN_RESULTS` estiver ativado.
+- `verificar_tipo_alvo()`: Determina se a entrada do usuário é um IP, domínio ou inválida.
+- `definir_alvo()`: Solicita ao usuário o alvo e tenta resolver seu IP (IPv4 e IPv6).
 
-3. **Torne o Script Executável**:
-   ```bash
-   chmod +x autorecon.sh
-   ```
+**Funções de Teste (chamadas pelo menu personalizado):**
+- `test_dig()`: Executa um teste DNS usando `dig`.
+- `test_traceroute()`: Realiza um traceroute para o alvo.
+- `test_curl_headers()`: Verifica os cabeçalhos HTTP do alvo usando `curl`.
 
-4. **Execute o Script**:
-   ```bash
-   sudo ./autorecon.sh
-   ```
+**Menus:**
+- `menu_personalizado()`: Oferece opções para testes específicos de FFUF (subdomínios, diretórios, extensões) e testes básicos (ping, DNS, traceroute, HTTP).
+- `menu_inicial()`: O menu principal que permite ao usuário escolher entre reconhecimento ativo, personalizado ou sair. Também instala dependências essenciais (jq, dig, nmap, ffuf, traceroute, curl, nc).
 
-## Funcionalidades
+**Uso:**
+O script deve ser executado com privilégios de root. Ele apresentará um menu inicial para o usuário escolher a estratégia de reconhecimento (ativo ou personalizado).
 
-- **Recon Ativo**: Realiza varreduras ativas como ping, testes de portas (22, 80, 443), Nmap (IPv4/IPv6), FFuf (web), AutoRecon, XRay, Firewalk e Clusterd. **Esta é a funcionalidade principal em produção.**
-- **Recon Passivo**: Inclui WHOIS e testes complexos (AttackSurfaceMapper, FFuf Subdomains, Gitleaks, Sherlock, Fierce, FinalRecon), mas muitos estão simulados ou requerem interação manual.
-- **Relatórios**: Gera um arquivo JSON (`scan_results_<timestamp>.json`) com resultados detalhados.
-- **Interface**: Oferece um menu interativo com opções personalizadas e estratégias predefinidas.
+```bash
+sudo ./autorecon.sh
+```
 
-## Uso
 
-### Execução Inicial
-- Ao iniciar, o script exibe um menu com as seguintes opções:
-  1. **PASSIVO + ATIVO**: Executa recon passivo seguido de ativo.
-  2. **ATIVO + PASSIVO**: Executa recon ativo seguido de passivo.
-  3. **PASSIVO**: Apenas recon passivo.
-  4. **ATIVO**: Apenas recon ativo (recomendado, pois está em produção).
-  5. **PERSONALIZADO**: Permite selecionar testes específicos (ping, DNS, portas, HTTP, WHOIS).
-  6. **SAIR**: Encerra o script.
 
-### Exemplos
-- **Teste Ativo Completo**:
-  ```bash
-  sudo ./autorecon.sh
-  ```
-  Escolha a opção 4 (ATIVO) e siga as prompts.
 
-- **Teste Personalizado de Portas**:
-  Escolha a opção 5, selecione "3. Teste de Portas" e insira portas (ex.: `22,80,443`).
+### `ativo.sh`
 
-### Notas
-- **Atenção**: Use apenas em ambientes autorizados, pois o recon ativo pode ser considerado invasivo.
-- **Interatividade**: Algumas ferramentas (ex.: FFuf, AutoRecon) requerem confirmação manual para execução.
+**Função:** Este script contém as funções responsáveis por executar os testes de reconhecimento ativo contra o alvo. Ele é chamado pelo `autorecon.sh` para realizar varreduras e coletas de informações de forma ativa.
 
-## Configuração
+**Dependências:** `utils.sh`.
 
-- **Wordlists**: Armazenadas em `$HOME/wordlists`. O script baixa SecLists automaticamente se não estiver presente.
-- **Saída**: Resultados salvos em arquivos de texto (ex.: `nmap_output.txt`) e um JSON consolidado.
-- **Personalização**: Ajuste os comandos em `NMAP_COMMANDS_IPV4`, `FFUF_COMMANDS`, etc., no script para necessidades específicas.
+**Variáveis Globais:**
+- `WORDLISTS_DIR`: Diretório onde as wordlists são armazenadas (padrão: `/home/wordlists`).
+- `PORT_STATUS_IPV4`, `PORT_STATUS_IPV6`: Arrays associativos para armazenar o status das portas para IPv4 e IPv6.
+- `PORT_TESTS_IPV4`, `PORT_TESTS_IPV6`: Arrays associativos para contar o número de testes por porta.
+- `RESULTS_DIR`: Diretório para salvar os resultados (herdado de `autorecon.sh`).
 
-## Limitações
+**Variáveis de Comandos:**
+- `NMAP_COMMANDS_IPV4`, `NMAP_COMMANDS_IPV6`: Arrays contendo comandos Nmap para varreduras IPv4 e IPv6 (ex: varredura TCP SYN, detecção de SO, detecção de serviço).
+- `FFUF_COMMANDS`, `FFUF_WEB_COMMANDS`, `FFUF_EXT_COMMANDS`: Arrays contendo comandos FFUF para enumeração de subdomínios, diretórios web e extensões de arquivos, respectivamente.
 
-- **Em Produção Parcial**: Apenas o recon ativo está totalmente funcional. Recursos passivos como Threat Intel e DNS Histórico são simulados.
-- **Dependências**: Algumas ferramentas (ex.: xray, firewalk) requerem instalação manual.
-- **Interatividade**: O script depende de entrada do usuário para certas execuções.
+**Funções Auxiliares:**
+- `determinar_protocolo()`: Tenta determinar o protocolo (HTTP ou HTTPS) do alvo.
+- `substituir_variaveis()`: Substitui placeholders nos comandos (ex: `{TARGET_IP}`, `{URL}`, `{WORDLIST_SUBDOMAINS}`) pelos valores reais. Também baixa wordlists se não existirem localmente.
+- `executar_comando()`: Função genérica para executar um comando e registrar seu status na `CHECKLIST`.
+- `analyze_nmap_results()`: Analisa os resultados de varreduras Nmap em formato XML para consolidar o status das portas.
+- `consolidar_portas()`: Consolida os resultados de múltiplos testes Nmap para cada porta e adiciona à `CHECKLIST`.
 
-## Contribuição
+**Funções de Teste Ativo:**
+- `test_ping()`: Realiza testes de ping para verificar a conectividade com o alvo (IPv4 e IPv6).
+- `test_http()`: Testa a acessibilidade HTTP/HTTPS do alvo usando `curl`.
+- `test_ffuf_subdomains()`: Executa varreduras FFUF para encontrar subdomínios.
+- `test_ffuf_directories()`: Executa varreduras FFUF para encontrar diretórios web.
+- `test_ffuf_extensions()`: Executa varreduras FFUF para encontrar extensões de arquivos web.
+- `Ativo_basico()`: Agrupa testes ativos básicos (ping, HTTP).
+- `Ativo_complexo()`: Agrupa testes ativos mais complexos (Nmap, FFUF para subdomínios, diretórios e extensões).
 
-Contribuições são bem-vindas! Abra issues ou envie pull requests para melhorar o recon passivo, adicionar relatórios ou otimizar o código.
+
+
+
+### `Generate-result.sh`
+
+**Função:** Este script é responsável por processar todos os resultados coletados pelos testes de reconhecimento e gerar um relatório final em formato Markdown. Ele consolida as informações, adiciona metadados, configurações das ferramentas e estatísticas.
+
+**Dependências:** `utils.sh`, `ativo.sh`.
+
+**Funções Auxiliares:**
+- `sanitize_string()`: Limpa strings para evitar caracteres problemáticos em saídas e relatórios.
+- `get_metadata()`: Coleta e formata metadados da análise, como script, SO, hora de início, usuário, alvo, IPs resolvidos e tipo de alvo.
+- `get_tool_config()`: Gera uma seção no relatório com as configurações dos comandos Nmap e FFUF utilizados.
+- `get_dependencies()`: Lista o status de instalação das dependências do script (jq, nmap, ffuf, dig, traceroute, curl, nc, xmllint).
+- `clean_intermediate_files()`: Remove arquivos temporários e intermediários gerados durante a execução dos testes.
+- `save_test_result()`: Salva o resultado de um teste individual no relatório Markdown, incluindo status, mensagem, timestamp e detalhes.
+- `process_test_results()`: Itera sobre a `CHECKLIST` (lista de resultados dos testes) e chama `save_test_result` para cada item, além de contar sucessos e falhas.
+- `process_result_files()`: Incorpora o conteúdo de arquivos de resultados (txt, csv, xml) gerados pelos testes no relatório final, formatando-os adequadamente.
+- `generate_statistics()`: Calcula e adiciona estatísticas gerais ao relatório, como total de testes, testes bem-sucedidos, testes com falha e tempo total de execução.
+- `save_report()`: Função principal que orquestra a geração do relatório, chamando as funções auxiliares para coletar metadados, processar resultados, incorporar arquivos e gerar estatísticas. Também configura um manipulador de interrupção para limpeza de arquivos.
+
+
+
+
+### `utils.sh`
+
+**Função:** Este script contém funções utilitárias e de formatação de saída que são compartilhadas entre os outros scripts do módulo de Reconhecimento (`autorecon.sh`, `ativo.sh`, `Generate-result.sh`). Ele padroniza a exibição de mensagens e fornece ferramentas para melhorar a experiência do usuário no terminal.
+
+**Dependências:** Nenhuma dependência externa direta, mas utiliza variáveis globais definidas em `autorecon.sh` (como `TARGET`, `TYPE_TARGET`, `TARGET_IPv4`, `TARGET_IPv6`, `CHECKLIST`) para exibir informações no relógio de carregamento.
+
+**Variáveis Globais:**
+- `BLUE`, `CYAN`, `GREEN`, `YELLOW`, `PURPLE`, `WHITE`, `RED`, `NC`: Variáveis para códigos de cores ANSI, usadas para formatar a saída do terminal. Se o terminal não suportar cores, as variáveis serão vazias.
+
+**Funções:**
+- `print_status(color, message)`: Exibe mensagens formatadas no terminal com cores diferentes para `info`, `action`, `success` e `error`.
+- `centralizar(texto)`: Centraliza um texto na largura do terminal. Se `tput` não estiver disponível, o texto é impresso sem centralização.
+- `print_clock_frame(frame, task, hora)`: Desenha um frame de um relógio ASCII no terminal, exibindo a hora atual, o alvo, o tipo de alvo, IPs resolvidos, a tarefa em execução e o checklist de testes. Alterna entre dois frames para criar uma animação de relógio.
+- `loading_clock(task, duration)`: Exibe um relógio de carregamento animado no terminal por uma duração especificada, mostrando a tarefa atual e o progresso do checklist. Utiliza `print_clock_frame` para a animação.
