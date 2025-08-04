@@ -16,6 +16,7 @@ TYPE_TARGET=""
 CHECKLIST=()
 START_TIME=$(date +%s)
 RESULTS_DIR="results"
+CLEAN_RESULTS="yes"  # Opção para ativar/desativar limpeza automática (yes/no)
 
 #------------#------------# FUNÇÕES AUXILIARES #------------#------------#
 validar_root() {
@@ -24,6 +25,21 @@ validar_root() {
         exit 1
     fi
     print_status "success" "Executando como root."
+}
+
+clean_results() {
+    if [ "$CLEAN_RESULTS" = "yes" ]; then
+        print_status "info" "Limpando arquivos residuais em $RESULTS_DIR..."
+        if [ -d "$RESULTS_DIR" ]; then
+            rm -f "$RESULTS_DIR"/* 2>/dev/null
+            print_status "success" "Diretório $RESULTS_DIR limpo."
+        else
+            print_status "info" "Diretório $RESULTS_DIR não existe, criando..."
+            mkdir -p "$RESULTS_DIR"
+        fi
+    else
+        print_status "info" "Limpeza de $RESULTS_DIR desativada (CLEAN_RESULTS=$CLEAN_RESULTS)."
+    fi
 }
 
 verificar_tipo_alvo() {
@@ -152,6 +168,7 @@ menu_personalizado() {
 }
 
 menu_inicial() {
+    clean_results  # Limpar arquivos residuais antes de iniciar
     # Instalar dependências
     for cmd in jq dig nmap ffuf traceroute curl nc; do
         if ! command -v $cmd &>/dev/null; then
@@ -172,7 +189,7 @@ menu_inicial() {
     while true; do
         clear
         centralizar "=============================="
-        centralizar "      AUTORECON v1.2.5      "
+        centralizar "      AUTORECON v1.2.4      "
         centralizar "=============================="
         echo
         centralizar "1. Ativo"

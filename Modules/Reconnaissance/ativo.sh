@@ -63,7 +63,19 @@ substituir_variaveis() {
     }
     local protocol=$(determinar_protocolo)
     local url="$protocol://$ip"
-    echo "$cmd" | sed "s/{TARGET}/$TARGET/g; s/{TARGET_IP}/$ip/g; s/{URL}/$url/g; s|{WORDLIST_SUBDOMAINS}|$wordlist_subdomains|g; s|{WORDLIST_WEB}|$wordlist_web|g"
+    # Sanitizar variáveis para evitar caracteres problemáticos
+    local safe_target=$(echo "$TARGET" | sed 's/[^a-zA-Z0-9.:-]/_/g')
+    local safe_ip=$(echo "$ip" | sed 's/[^a-zA-Z0-9.:-]/_/g')
+    local safe_url=$(echo "$url" | sed 's/[^a-zA-Z0-9.:/=-]/_/g')
+    local safe_wordlist_subdomains=$(echo "$wordlist_subdomains" | sed 's/[^a-zA-Z0-9./-]/_/g')
+    local safe_wordlist_web=$(echo "$wordlist_web" | sed 's/[^a-zA-Z0-9./-]/_/g')
+    # Usar delimitador alternativo (#) para evitar conflitos com / ou :
+    echo "$cmd" | sed \
+        -e "s#{TARGET}#$safe_target#g" \
+        -e "s#{TARGET_IP}#$safe_ip#g" \
+        -e "s#{URL}#$safe_url#g" \
+        -e "s#{WORDLIST_SUBDOMAINS}#$safe_wordlist_subdomains#g" \
+        -e "s#{WORDLIST_WEB}#$safe_wordlist_web#g"
 }
 
 executar_comando() {
@@ -199,7 +211,11 @@ Ativo_complexo() {
     mkdir -p "$RESULTS_DIR"
     if [ -n "$TARGET_IPv4" ]; then
         for cmd in "${NMAP_COMMANDS_IPV4[@]}"; do
-            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4")
+            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4") || {
+                print_status "error" "Falha ao substituir variáveis no comando Nmap IPv4: $cmd"
+                CHECKLIST+=("Nmap IPv4: ✗ Falha na substituição de variáveis")
+                continue
+            }
             local output_file="$RESULTS_DIR/nmap_ipv4_$(echo "$cmd" | tr ' ' '_' | tr -d '{}').xml"
             executar_comando "$cmd_substituido -oX $output_file" "Nmap IPv4" "$output_file" "Portas escaneadas" "Nenhuma porta encontrada"
             [ -f "$output_file" ] && analyze_nmap_results "$output_file" "IPv4"
@@ -208,7 +224,11 @@ Ativo_complexo() {
     fi
     if [ -n "$TARGET_IPv6" ]; then
         for cmd in "${NMAP_COMMANDS_IPV6[@]}"; do
-            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv6")
+            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv6") || {
+                print_status "error" "Falha ao substituir variáveis no comando Nmap IPv6: $cmd"
+                CHECKLIST+=("Nmap IPv6: ✗ Falha na substituição de variáveis")
+                continue
+            }
             local output_file="$RESULTS_DIR/nmap_ipv6_$(echo "$cmd" | tr ' ' '_' | tr -d '{}').xml"
             executar_comando "$cmd_substituido -oX $output_file" "Nmap IPv6" "$output_file" "Portas escaneadas" "Nenhuma porta encontrada"
             [ -f "$output_file" ] && analyze_nmap_results "$output_file" "IPv6"
