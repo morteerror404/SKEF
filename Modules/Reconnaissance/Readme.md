@@ -2,16 +2,6 @@
 
 Este módulo contém scripts para automação de tarefas de reconhecimento ativo e passivo, focando na coleta de informações sobre alvos para testes de penetração.
 
-## Data-Flow 
-
-```mermaid
-
-flowchart TD
-    User -->|executa| Módulo_Reconhecimento
-    Módulo_Reconhecimento -->|gera| Relatório[Relatório Markdown]
-end
-```
-
 ## Conteúdo do Módulo
 
 - `autorecon.sh`: Script principal para orquestrar o reconhecimento.
