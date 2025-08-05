@@ -6,7 +6,8 @@
 
 source ./utils.sh
 source ./ativo.sh
-# source ./passivo.sh  # Descomentar quando passivo.sh estiver implementado
+# source ./passivo.sh  
+# Descomentar quando passivo.sh estiver implementado
 
 #------------#------------# VARIÁVEIS GLOBAIS #------------#------------#
 TARGET=""
