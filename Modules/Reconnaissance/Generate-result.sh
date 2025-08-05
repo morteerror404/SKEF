@@ -74,7 +74,7 @@ clean_intermediate_files() {
         }
     fi
     local files_removed=0
-    for file in "$RESULTS_DIR"/*.{txt,csv,xml,log}; do
+    for file in "$RESULTS_DIR"/*.{txt,csv,xml}; do
         if [ -f "$file" ] && [ "$(basename "$file")" != "relatorio.md" ]; then
             rm -f "$file" 2>>"$temp_error_log" && ((files_removed++))
             print_status "success" "Arquivo $(basename "$file") removido."
@@ -90,13 +90,16 @@ clean_intermediate_files() {
 }
 
 save_test_result() {
-    local test_name="$1" status="$2" message="$3" details="$4"
+    local test_name="$1" status="$2" message="$3" details="$4" file_content="$5"
     local report_file="$RESULTS_DIR/relatorio.md"
     local test_entry="### Teste: $(sanitize_string "$test_name")\n"
     test_entry+="- **Status**: $([[ "$status" == *"✓"* ]] && echo 'Sucesso' || echo 'Falha')\n"
     test_entry+="- **Mensagem**: $(sanitize_string "$message")\n"
     test_entry+="- **Timestamp**: $(date +'%Y-%m-%d %H:%M:%S')\n"
-    test_entry+="- **Detalhes**:\n$details\n\n"
+    test_entry+="- **Detalhes**:\n$details\n"
+    if [ -n "$file_content" ]; then
+        test_entry+="\n#### Conteúdo do Arquivo\n\`\`\`xml\n$file_content\n\`\`\`\n"
+    fi
 
     if [[ ! -f "$report_file" ]]; then
         mkdir -p "$RESULTS_DIR" 2>>"$RESULTS_DIR/error.log" || {
@@ -133,6 +136,7 @@ process_test_results() {
         local status=$(echo "${parts[1]}" | xargs)
         local message=$(echo "${parts[1]}" | cut -d' ' -f2- | xargs)
         local details=""
+        local file_content=""
 
         case $test_name in
             "Ping"*)
@@ -153,21 +157,48 @@ process_test_results() {
                 local cmd_ipv6=$(sanitize_string "nc -zv -w 2 $TARGET_IPv6 $port")
                 details="  - Porta: $port\n  - Comando IPv4: $cmd_ipv4\n  - Comando IPv6: $cmd_ipv6"
                 ;;
-            "Nmap"*)
+            "Nmap IPv4")
                 local cmd=$(sanitize_string "$(substituir_variaveis "${NMAP_COMMANDS_IPV4[*]}" "$TARGET_IPv4")")
-                local results_file=$(ls "$RESULTS_DIR"/nmap_*.xml 2>/dev/null | xargs -n1 basename | tr '\n' ',' | sed 's/,$//')
+                local results_file=$(ls "$RESULTS_DIR"/nmap_ipv4_*.xml 2>/dev/null | xargs -n1 basename | tr '\n' ',' | sed 's/,$//')
                 details="  - Comando: $cmd\n  - Arquivo de Resultados: ${results_file:-N/A}"
+                # Incluir conteúdo dos arquivos XML
+                for file in "$RESULTS_DIR"/nmap_ipv4_*.xml; do
+                    if [ -f "$file" ]; then
+                        local file_name=$(basename "$file")
+                        if command -v xmllint &>/dev/null; then
+                            file_content+="$(xmllint --format "$file" 2>/dev/null | sed 's/^/    /')\n"
+                        else
+                            file_content+="    xmllint não instalado, conteúdo XML não formatado:\n$(cat "$file" | sed 's/^/    /')\n"
+                        fi
+                    fi
+                done
                 ;;
-            "FFUF Subdomínios"*)
+            "Nmap IPv6")
+                local cmd=$(sanitize_string "$(substituir_variaveis "${NMAP_COMMANDS_IPV6[*]}" "$TARGET_IPv6")")
+                local results_file=$(ls "$RESULTS_DIR"/nmap_ipv6_*.xml 2>/dev/null | xargs -n1 basename | tr '\n' ',' | sed 's/,$//')
+                details="  - Comando: $cmd\n  - Arquivo de Resultados: ${results_file:-N/A}"
+                # Incluir conteúdo dos arquivos XML
+                for file in "$RESULTS_DIR"/nmap_ipv6_*.xml; do
+                    if [ -f "$file" ]; then
+                        local file_name=$(basename "$file")
+                        if command -v xmllint &>/dev/null; then
+                            file_content+="$(xmllint --format "$file" 2>/dev/null | sed 's/^/    /')\n"
+                        else
+                            file_content+="    xmllint não instalado, conteúdo XML não formatado:\n$(cat "$file" | sed 's/^/    /')\n"
+                        fi
+                    fi
+                done
+                ;;
+            "FFUF Subdomínios")
                 local cmd=$(sanitize_string "$(substituir_variaveis "${FFUF_COMMANDS[*]}" "$TARGET_IPv4")")
                 details="  - Comando: $cmd\n  - Arquivo de Resultados: ffuf_subdomains.csv"
                 ;;
-            "FFUF Web"*)
-                local cmd=$(sanitize_string "$(substituir_variaveis "${FFUF_WEB_COMMANDS[*]}" "$TARGET_IPv4")")
+            "FFUF Web")
+                local cmd=$(sanitize_string "$(substituir_variaveis "${FFUF_WEB_COMMANDS[*]}" "$TARGET_IPv4")"))
                 details="  - Comando: $cmd\n  - Arquivo de Resultados: ffuf_web.csv"
                 ;;
-            "FFUF Extensões"*)
-                local cmd=$(sanitize_string "$(substituir_variaveis "${FFUF_EXT_COMMANDS[*]}" "$TARGET_IPv4")")
+            "FFUF Extensões")
+                local cmd=$(sanitize_string "$(substituir_variaveis "${FFUF_EXT_COMMANDS[*]}" "$TARGET_IPv4")"))
                 details="  - Comando: $cmd\n  - Arquivo de Resultados: ffuf_extensions.csv"
                 ;;
             "HTTP"*)
@@ -183,7 +214,7 @@ process_test_results() {
                 ;;
         esac
 
-        save_test_result "$test_name" "$status" "$message" "$details"
+        save_test_result "$test_name" "$status" "$message" "$details" "$file_content"
         [[ "$status" == *"✓"* ]] && ((success_count++)) || ((failure_count++))
     done
     echo "$success_count $failure_count"
@@ -198,7 +229,7 @@ process_result_files() {
             print_status "error" "Falha ao escrever seção de arquivos em $report_file"
             return 1
         }
-        for file in "$RESULTS_DIR"/*.{txt,csv,xml}; do
+        for file in "$RESULTS_DIR"/*.{txt,csv}; do  # Excluir arquivos XML
             if [ -f "$file" ] && [ "$(basename "$file")" != "relatorio.md" ]; then
                 files_processed=true
                 local file_name=$(basename "$file")
@@ -207,13 +238,6 @@ process_result_files() {
                 case $file_type in
                     "txt") content=$(cat "$file" 2>/dev/null | sed 's/^/    /') ;;
                     "csv") content=$(awk -F',' 'NR>1 {print "    " $0}' "$file" 2>/dev/null) ;;
-                    "xml") 
-                        if command -v xmllint &>/dev/null; then
-                            content=$(xmllint --format "$file" 2>/dev/null | sed 's/^/    /')
-                        else
-                            content="    xmllint não instalado, conteúdo XML não formatado:\n$(cat "$file" | sed 's/^/    /')"
-                        fi
-                        ;;
                 esac
                 if [ -n "$content" ]; then
                     echo -e "### Arquivo: $file_name\n\`\`\`$file_type\n$content\n\`\`\`\n" >> "$report_file" 2>>"$RESULTS_DIR/error.log" || {
@@ -227,7 +251,7 @@ process_result_files() {
                 fi
             fi
         done
-        [ "$files_processed" = false ] && echo -e "Nenhum arquivo de resultado (txt, csv, xml) encontrado na pasta $RESULTS_DIR.\n" >> "$report_file" 2>>"$RESULTS_DIR/error.log"
+        [ "$files_processed" = false ] && echo -e "Nenhum arquivo de resultado (txt, csv) encontrado na pasta $RESULTS_DIR.\n" >> "$report_file" 2>>"$RESULTS_DIR/error.log"
     else
         echo -e "Nenhum arquivo de resultado encontrado, pois a pasta $RESULTS_DIR não existe.\n" >> "$report_file" 2>>"$RESULTS_DIR/error.log"
     fi
