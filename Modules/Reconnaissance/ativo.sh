@@ -155,14 +155,17 @@ test_ping() {
 }
 
 test_http() {
-    print_status "action" "Testando HTTP"
+    print_status "action" "Testando HTTP")
     local protocol=$(determinar_protocolo)
     local output_file="$RESULTS_DIR/http_test.txt"
-    if curl -s -o "$output_file" -w "%{http_code}" "$protocol://$TARGET" | grep -qE '200|301|302'; then
+    # Usar -I para pegar apenas headers
+    if curl -sI -o "$output_file" -w "%{http_code}" "$protocol://$TARGET" | grep -qE '200|301|302'; then
         CHECKLIST+=("HTTP ($protocol): ✓ Servidor ativo")
     else
         CHECKLIST+=("HTTP ($protocol): ✗ Servidor inativo ou erro")
     fi
+    # Limitar o conteúdo do arquivo apenas aos headers
+    sed -i '/^\r$/q' "$output_file"  # Remove o corpo da resposta se houver
 }
 
 test_ffuf_subdomains() {
@@ -178,8 +181,11 @@ test_ffuf_subdomains() {
 
 test_ffuf_directories() {
     if [ "$TYPE_TARGET" = "DOMAIN" ]; then
+        local protocol=$(determinar_protocolo)
+        local target_url="$protocol://$TARGET"  # Modificação aqui
+        
         for cmd in "${FFUF_WEB_COMMANDS[@]}"; do
-            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4") || return 1
+            local cmd_substituido=$(echo "$cmd" | sed "s|{URL}|$target_url|g")
             executar_comando "$cmd_substituido" "FFUF Web" "$RESULTS_DIR/ffuf_web.csv" "Recursos web encontrados" "Nenhum recurso web encontrado"
         done
     else
