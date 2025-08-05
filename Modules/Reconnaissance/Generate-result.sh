@@ -92,15 +92,16 @@ clean_intermediate_files() {
 }
 
 save_test_result() {
-    local test_name="$1" status="$2" message="$3" details="$4" file_content="$5"
-    local report_file="$RESULTS_DIR/relatorio.md"
-    local test_entry="### Teste: $(sanitize_string "$test_name")\n"
-    test_entry+="- **Status**: $([[ "$status" == *"✓"* ]] && echo 'Sucesso' || echo 'Falha')\n"
-    test_entry+="- **Mensagem**: $(sanitize_string "$message")\n"
-    test_entry+="- **Timestamp**: $(date +'%Y-%m-%d %H:%M:%S')\n"
-    test_entry+="- **Detalhes**:\n$details\n"
-    if [ -n "$file_content" ]; then
-        test_entry+="\n#### Conteúdo do Arquivo\n\`\`\`xml\n$file_content\n\`\`\`\n"
+    # Verificar permissões do diretório
+    if ! [ -d "$RESULTS_DIR" ] || ! [ -w "$RESULTS_DIR" ]; then
+        mkdir -p "$RESULTS_DIR" 2>>"$RESULTS_DIR/error.log" || {
+            print_status "error" "Falha ao criar diretório $RESULTS_DIR"
+            return 1
+        }
+        chmod u+w "$RESULTS_DIR" 2>>"$RESULTS_DIR/error.log" || {
+            print_status "error" "Falha ao definir permissões no diretório $RESULTS_DIR"
+            return 1
+        }
     fi
 
     # Verificar permissões do diretório
@@ -138,6 +139,30 @@ save_test_result() {
 }
 
 process_test_results() {
+    # Adicionado tratamento para Nmap
+    case $test_name in
+        "Nmap IPv4"*)
+            local scan_type=$(echo "$test_name" | sed 's/Nmap IPv4 //')
+            local cmd="" results_file=""
+            case "$scan_type" in
+                "TCP Connect Scan") 
+                    cmd=$(substituir_variaveis "${NMAP_COMMANDS_IPV4[0]}" "$TARGET_IPv4")
+                    results_file="$RESULTS_DIR/nmap_ipv4_tcp_connect.xml"
+                    ;;
+                "OS Detection Scan")
+                    cmd=$(substituir_variaveis "${NMAP_COMMANDS_IPV4[1]}" "$TARGET_IPv4")
+                    results_file="$RESULTS_DIR/nmap_ipv4_os_detection.xml"
+                    ;;
+                "Service Version Scan")
+                    cmd=$(substituir_variaveis "${NMAP_COMMANDS_IPV4[2]}" "$TARGET_IPv4")
+                    results_file="$RESULTS_DIR/nmap_ipv4_service_version.xml"
+                    ;;
+            esac
+            details="  - Tipo: $scan_type\n  - Comando: $cmd\n  - Arquivo: ${results_file##*/}"
+            ;;
+        # Tratamento similar para IPv6...
+    esac
+}
     local success_count=0 failure_count=0
     [ ${#CHECKLIST[@]} -eq 0 ] && {
         print_status "error" "CHECKLIST vazia, nenhum teste para processar"
@@ -352,311 +377,4 @@ save_report() {
     fi
     echo "DEBUG: clean_intermediate_files concluído" >>"$RESULTS_DIR/error.log"
     print_status "success" "Relatório final salvo em $RESULTS_DIR/relatorio.md"
-}
-```
-
-**Alterações**:
-- **Verificação de Permissões**: Adicionada uma verificação explícita em `save_test_result` para garantir que o diretório `results/` existe e tem permissões de escrita.
-- **Logs Detalhados**: Adicionados logs em `error.log` para cada etapa de `save_report` e `save_test_result`, incluindo falhas específicas.
-- **CHECKLIST Vazia**: Verificação em `process_test_results` para evitar processamento se `CHECKLIST` estiver vazia.
-- **Nmap Testes Distintos**: Atualizada a lógica para `Nmap IPv4` e `Nmap IPv6` para associar cada teste ao arquivo XML correto, usando nomes como "TCP Connect Scan", "OS Detection Scan", e "Service Version Scan".
-- **Retorno de Erros**: Cada função (`process_test_results`, `process_result_files`, `generate_statistics`, `clean_intermediate_files`) agora retorna códigos de erro explícitos para interromper a execução se necessário.
-
-#### **ativo.sh**
-As alterações garantem que os testes Nmap sejam registrados com nomes distintos e que os arquivos sejam gerados corretamente.
-
-<xaiArtifact artifact_id="45678f12-7e69-4229-b9f2-76b044f71f49" artifact_version_id="353b6276-fbe4-4ffb-bead-c4e72ab8b48c" title="ativo.sh" contentType="text/x-shellscript">
-```bash
-#!/bin/bash
-
-# ativo.sh
-# Função: Executar testes ativos (ping, portas, Nmap, FFUF) e retornar resultados para autorecon.sh
-# Dependências: utils.sh
-
-source "$(dirname "$0")/utils.sh"
-export -f determinar_protocolo
-
-#------------#------------# VARIÁVEIS GLOBAIS #------------#------------#
-WORDLISTS_EXT="/home/wordlists/SecLists/Discovery/Web-Content/web-extensions.txt"
-WORDLIST_SUBDOMAINS="/home/wordlists/SecLists/Discovery/DNS/subdomains-top1million-110000.txt"
-WORDLIST_WEB="/home/wordlists/SecLists/Discovery/Web-Content/directory-list-lowercase-2.3-big.txt"
-declare -A PORT_STATUS_IPV4
-declare -A PORT_STATUS_IPV6
-declare -A PORT_TESTS_IPV4
-declare -A PORT_TESTS_IPV6
-RESULTS_DIR="results"
-
-#------------#------------# VARIÁVEIS COMANDOS #------------#------------#
-NMAP_COMMANDS_IPV4=(
-    "nmap {TARGET_IP} -sT -vv -Pn"
-    "nmap {TARGET_IP} -vv -O -Pn"
-    "nmap {TARGET_IP} -sV -O -vv -Pn"
-)
-NMAP_COMMANDS_IPV6=(
-    "nmap -6 {TARGET_IP} -sT -vv -Pn"
-    "nmap -6 {TARGET_IP} -vv -O -Pn"
-    "nmap -6 {TARGET_IP} -sV -O -vv -Pn"
-)
-FFUF_COMMANDS=(
-    "ffuf -u {URL}/ -H 'Host: FUZZ.{DOMINIO}' -w {WORDLIST_SUBDOMAINS} -mc 200,301,302 -fc 404 -timeout 10 -t 50 -o $RESULTS_DIR/ffuf_subdomains.csv -of csv"
-)
-FFUF_WEB_COMMANDS=(
-    "ffuf -u {URL}/FUZZ -w {WORDLIST_WEB} -mc 200,301,302 -recursion -recursion-depth 3 -fc 404 -timeout 10 -t 50 -o $RESULTS_DIR/ffuf_web.csv -of csv"
-)
-FFUF_EXT_COMMANDS=(
-    "ffuf -u {URL}/index.FUZZ -w {WORDLISTS_EXT} -mc 200,301,302 -timeout 10 -fc 404 -t 50 -o $RESULTS_DIR/ffuf_extensions.csv -of csv"
-)
-
-#------------#------------# FUNÇÕES AUXILIARES #------------#------------#
-determinar_protocolo() {
-    local protocol="http"
-    { nc -zv -w 2 "$TARGET_IPv4" 443 &>/dev/null || nc -zv -w 2 "$TARGET_IPv6" 443 &>/dev/null; } && protocol="https"
-    echo "$protocol"
-}
-
-substituir_variaveis() {
-    local cmd="$1" ip="$2"
-    local wordlist_subdomains="$WORDLIST_SUBDOMAINS"
-    local wordlist_web="$WORDLIST_WEB"
-    
-    # Verificar e baixar wordlist de subdomínios
-    if [ ! -f "$wordlist_subdomains" ]; then
-        wordlist_subdomains="/tmp/subdomains.txt"
-        print_status "info" "Wordlist de subdomínios não encontrada. Baixando..."
-        curl -s https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-110000.txt -o "$wordlist_subdomains" || {
-            print_status "error" "Falha ao baixar wordlist de subdomínios"
-            echo "Falha ao baixar $wordlist_subdomains" >>"$RESULTS_DIR/error.log"
-            return 1
-        }
-        if [ ! -s "$wordlist_subdomains" ]; then
-            print_status "error" "Wordlist de subdomínios baixada está vazia ou inválida"
-            echo "Wordlist $wordlist_subdomains vazia ou inválida" >>"$RESULTS_DIR/error.log"
-            return 1
-        }
-    fi
-    
-    # Verificar e baixar wordlist web
-    if [ ! -f "$wordlist_web" ]; then
-        wordlist_web="/tmp/directory-list.txt"
-        print_status "info" "Wordlist web não encontrada. Baixando..."
-        curl -s https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/directory-list-lowercase-2.3-big.txt -o "$wordlist_web" || {
-            print_status "error" "Falha ao baixar wordlist web"
-            echo "Falha ao baixar $wordlist_web" >>"$RESULTS_DIR/error.log"
-            return 1
-        }
-        if [ ! -s "$wordlist_web" ]; then
-            print_status "error" "Wordlist web baixada está vazia ou inválida"
-            echo "Wordlist $wordlist_web vazia ou inválida" >>"$RESULTS_DIR/error.log"
-            return 1
-        }
-    fi
-    
-    local protocol=$(determinar_protocolo)
-    local url="$protocol://$ip"
-    local safe_target=$(echo "$TARGET" | sed 's/[^a-zA-Z0-9.:-]/_/g')
-    local safe_ip=$(echo "$ip" | sed 's/[^a-zA-Z0-9.:-]/_/g')
-    local safe_url=$(echo "$url" | sed 's/[^a-zA-Z0-9.:/=-]/_/g')
-    local safe_wordlist_subdomains=$(echo "$wordlist_subdomains" | sed 's/[^a-zA-Z0-9./-]/_/g')
-    local safe_wordlist_web=$(echo "$wordlist_web" | sed 's/[^a-zA-Z0-9./-]/_/g')
-    local safe_dominio=$(echo "$URL_DOMINIO" | sed 's/[^a-zA-Z0-9.:-]/_/g')
-    echo "$cmd" | sed \
-        -e "s#{DOMINIO}#$safe_dominio#g" \
-        -e "s#{TARGET_IP}#$safe_ip#g" \
-        -e "s#{URL}#$safe_url#g" \
-        -e "s#{WORDLIST_SUBDOMAINS}#$safe_wordlist_subdomains#g" \
-        -e "s#{WORDLIST_WEB}#$safe_wordlist_web#g"
-}
-
-executar_comando() {
-    local cmd="$1" name="$2" output_file="$3" success_msg="$4" fail_msg="$5"
-    print_status "action" "Executando $name"
-    local temp_output=$(mktemp)
-    if $cmd >"$temp_output" 2>&1; then
-        local results=$(wc -l < "$temp_output")
-        [ "$results" -gt 0 ] && CHECKLIST+=("$name: ✓ $success_msg ($results linhas)") || CHECKLIST+=("$name: ✓ $fail_msg")
-    else
-        CHECKLIST+=("$name: ✗ Falha")
-        echo "Erro ao executar comando: $cmd" >>"$RESULTS_DIR/error.log"
-    fi
-    mv "$temp_output" "$output_file" 2>>"$RESULTS_DIR/error.log" || {
-        print_status "error" "Falha ao mover $temp_output para $output_file"
-        echo "Falha ao mover $temp_output para $output_file" >>"$RESULTS_DIR/error.log"
-    }
-}
-
-analyze_nmap_results() {
-    local xml_file="$1" ip_version="$2"
-    if [ ! -f "$xml_file" ]; then
-        print_status "error" "Arquivo $xml_file não encontrado"
-        echo "Arquivo $xml_file não encontrado" >>"$RESULTS_DIR/error.log"
-        return 1
-    fi
-    local -n port_status="PORT_STATUS_$ip_version"
-    local -n port_tests="PORT_TESTS_$ip_version"
-    local ports=($(grep -oP 'portid="\d+"' "$xml_file" | cut -d'"' -f2 | sort -u))
-    for port in "${ports[@]}"; do
-        state=$(grep -oP "portid=\"$port\".*state=\"\K[^\"]+(?=\")" "$xml_file" | head -1)
-        port_status["$port"]+="$state,"
-        port_tests["$port"]=$((port_tests["$port"] + 1))
-    done
-}
-
-consolidar_portas() {
-    local ip_version="$1"
-    local -n port_status="PORT_STATUS_$ip_version"
-    local -n port_tests="PORT_TESTS_$ip_version"
-    for port in "${!port_status[@]}"; do
-        local states=(${port_status[$port]//,/ })
-        local open_count=0 closed_count=0 filtered_count=0
-        for state in "${states[@]}"; do
-            case "$state" in
-                "open") ((open_count++)) ;;
-                "closed") ((closed_count++)) ;;
-                "filtered") ((filtered_count++)) ;;
-            esac
-        done
-        local total_tests=${port_tests["$port"]}
-        if [ $open_count -eq $total_tests ]; then
-            CHECKLIST+=("Porta $port ($ip_version): ✓ Aberta")
-        elif [ $closed_count -eq $total_tests ]; then
-            CHECKLIST+=("Porta $port ($ip_version): ✗ Fechada")
-        else
-            CHECKLIST+=("Porta $port ($ip_version): ⚠ Filtrada ($open_count aberta, $closed_count fechada, $filtered_count filtrada)")
-        fi
-    done
-}
-
-#------------#------------# FUNÇÕES DE TESTE ATIVO #------------#------------#
-test_ping() {
-    local ip="$1" version="$2"
-    local ping_cmd="ping -c 4 $ip" && [ "$version" = "IPv6" ] && ping_cmd="ping6 -c 4 $ip"
-    print_status "action" "Testando PING $version"
-    loading_clock "Testando PING $version" 3 &
-    pid=$!
-    local ping_result=$($ping_cmd 2>&1)
-    if [ $? -eq 0 ]; then
-        packet_loss=$(echo "$ping_result" | grep -oP '\d+(?=% packet loss)' || echo "0")
-        avg_latency=$(echo "$ping_result" | grep -oPm1 '[\d.]+(?=\s*ms$)' | tail -1 || echo "N/A")
-        CHECKLIST+=("Ping $version: ✓ Sucesso (Perda: ${packet_loss}%, Latência: ${avg_latency}ms)")
-    else
-        CHECKLIST+=("Ping $version: ✗ Falha")
-        echo "Erro ao executar ping $version: $ping_cmd" >>"$RESULTS_DIR/error.log"
-    fi
-    kill -0 $pid 2>/dev/null && kill $pid
-    wait $pid 2>/dev/null
-}
-
-test_http() {
-    print_status "action" "Testando HTTP"
-    local protocol=$(determinar_protocolo)
-    local output_file="$RESULTS_DIR/http_test.txt"
-    if curl -s -o "$output_file" -w "%{http_code}" "$protocol://$TARGET" | grep -qE '200|301|302'; then
-        CHECKLIST+=("HTTP ($protocol): ✓ Servidor ativo")
-    else
-        CHECKLIST+=("HTTP ($protocol): ✗ Servidor inativo ou erro")
-        echo "Erro ao executar curl $protocol://$TARGET" >>"$RESULTS_DIR/error.log"
-    fi
-}
-
-test_ffuf_subdomains() {
-    if [ "$TYPE_TARGET" = "DOMAIN" ]; then
-        for cmd in "${FFUF_COMMANDS[@]}"; do
-            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4") || {
-                print_status "error" "Falha ao substituir variáveis no comando FFUF Subdomínios"
-                CHECKLIST+=("FFUF Subdomínios: ✗ Falha na substituição de variáveis")
-                return 1
-            }
-            executar_comando "$cmd_substituido" "FFUF Subdomínios" "$RESULTS_DIR/ffuf_subdomains.csv" "Subdomínios encontrados" "Nenhum subdomínio encontrado"
-        done
-    else
-        CHECKLIST+=("FFUF Subdomínios: ✗ Teste requer domínio")
-    fi
-}
-
-test_ffuf_directories() {
-    if [ "$TYPE_TARGET" = "DOMAIN" ]; then
-        for cmd in "${FFUF_WEB_COMMANDS[@]}"; do
-            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4") || {
-                print_status "error" "Falha ao substituir variáveis no comando FFUF Web"
-                CHECKLIST+=("FFUF Web: ✗ Falha na substituição de variáveis")
-                return 1
-            }
-            executar_comando "$cmd_substituido" "FFUF Web" "$RESULTS_DIR/ffuf_web.csv" "Recursos web encontrados" "Nenhum recurso web encontrado"
-        done
-    else
-        CHECKLIST+=("FFUF Web: ✗ Teste requer domínio")
-    fi
-}
-
-test_ffuf_extensions() {
-    if [ "$TYPE_TARGET" = "DOMAIN" ]; then
-        for cmd in "${FFUF_EXT_COMMANDS[@]}"; do
-            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4") || {
-                print_status "error" "Falha ao substituir variáveis no comando FFUF Extensões"
-                CHECKLIST+=("FFUF Extensões: ✗ Falha na substituição de variáveis")
-                return 1
-            }
-            executar_comando "$cmd_substituido" "FFUF Extensões" "$RESULTS_DIR/ffuf_extensions.csv" "Extensões encontradas" "Nenhuma extensão encontrada"
-        done
-    else
-        CHECKLIST+=("FFUF Extensões: ✗ Teste requer domínio")
-    fi
-}
-
-Ativo_basico() {
-    print_status "info" "Executando testes ATIVOS BÁSICOS em $TARGET"
-    loading_clock "Testes Ativos Básicos" 3 &
-    pid=$!
-    [ -n "$TARGET_IPv4" ] && test_ping "$TARGET_IPv4" "IPv4"
-    [ -n "$TARGET_IPv6" ] && test_ping "$TARGET_IPv6" "IPv6"
-    [ "$TYPE_TARGET" = "DOMAIN" ] && test_http
-    kill -0 $pid 2>/dev/null && kill $pid
-    wait $pid 2>/dev/null
-}
-
-Ativo_complexo() {
-    print_status "info" "Executando testes ATIVOS COMPLEXOS em $TARGET"
-    mkdir -p "$RESULTS_DIR" 2>>"$RESULTS_DIR/error.log" || {
-        print_status "error" "Falha ao criar diretório $RESULTS_DIR"
-        echo "Falha ao criar diretório $RESULTS_DIR" >>"$RESULTS_DIR/error.log"
-        return 1
-    }
-    chmod u+w "$RESULTS_DIR" 2>>"$RESULTS_DIR/error.log" || {
-        print_status "error" "Falha ao definir permissões no diretório $RESULTS_DIR"
-        echo "Falha ao definir permissões no diretório $RESULTS_DIR" >>"$RESULTS_DIR/error.log"
-        return 1
-    }
-    if [ -n "$TARGET_IPv4" ]; then
-        local scan_types=("TCP Connect Scan" "OS Detection Scan" "Service Version Scan")
-        for i in "${!NMAP_COMMANDS_IPV4[@]}"; do
-            local cmd="${NMAP_COMMANDS_IPV4[$i]}"
-            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4") || {
-                print_status "error" "Falha ao substituir variáveis no comando Nmap IPv4: $cmd"
-                CHECKLIST+=("Nmap IPv4 ${scan_types[$i]}: ✗ Falha na substituição de variáveis")
-                continue
-            }
-            local output_file="$RESULTS_DIR/nmap_ipv4_$(echo "$cmd" | tr ' ' '_' | tr -d '{}').xml"
-            executar_comando "$cmd_substituido -oX $output_file" "Nmap IPv4 ${scan_types[$i]}" "$output_file" "Portas escaneadas" "Nenhuma porta encontrada"
-            [ -f "$output_file" ] && analyze_nmap_results "$output_file" "IPv4"
-        done
-        consolidar_portas "IPv4"
-    fi
-    if [ -n "$TARGET_IPv6" ]; then
-        local scan_types=("TCP Connect Scan" "OS Detection Scan" "Service Version Scan")
-        for i in "${!NMAP_COMMANDS_IPV6[@]}"; do
-            local cmd="${NMAP_COMMANDS_IPV6[$i]}"
-            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv6") || {
-                print_status "error" "Falha ao substituir variáveis no comando Nmap IPv6: $cmd"
-                CHECKLIST+=("Nmap IPv6 ${scan_types[$i]}: ✗ Falha na substituição de variáveis")
-                continue
-            }
-            local output_file="$RESULTS_DIR/nmap_ipv6_$(echo "$cmd" | tr ' ' '_' | tr -d '{}').xml"
-            executar_comando "$cmd_substituido -oX $output_file" "Nmap IPv6 ${scan_types[$i]}" "$output_file" "Portas escaneadas" "Nenhuma porta encontrada"
-            [ -f "$output_file" ] && analyze_nmap_results "$output_file" "IPv6"
-        done
-        consolidar_portas "IPv6"
-    fi
-    [ "$TYPE_TARGET" = "DOMAIN" ] && test_ffuf_subdomains
-    [ "$TYPE_TARGET" = "DOMAIN" ] && test_ffuf_directories
-    [ "$TYPE_TARGET" = "DOMAIN" ] && test_ffuf_extensions
 }

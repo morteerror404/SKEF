@@ -10,8 +10,7 @@ export -f determinar_protocolo
 #------------#------------# VARIÁVEIS GLOBAIS #------------#------------#
 WORDLISTS_EXT="/home/wordlists/SecLists/Discovery/Web-Content/web-extensions.txt"
 WORDLIST_SUBDOMAINS="/home/wordlists/SecLists/Discovery/DNS/subdomains-top1million-110000.txt"
-WORDLIST_WEB="/home/wordlists/SecLists/Discovery/Web-Content/directory-list-lowercas
-e-2.3-big.txt"
+WORDLIST_WEB="/home/wordlists/SecLists/Discovery/Web-Content/directory-list-lowercase-2.3-big.txt"
 declare -A PORT_STATUS_IPV4
 declare -A PORT_STATUS_IPV6
 declare -A PORT_TESTS_IPV4
