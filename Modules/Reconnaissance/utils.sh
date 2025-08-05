@@ -48,37 +48,99 @@ centralizar() {
 }
 
 print_clock_frame() {
-    local frame=$1 task=$2 hora=$(date +"%H:%M:%S")
+    local frame=$1 task=$2
+    local hora=$(date +"%H:%M:%S")
     clear
-    echo -e "${BLUE}=== Target: ${CYAN}${TARGET:-N/A} ${BLUE}(${TYPE_TARGET:-N/A}) ===${NC}"
-    [ -n "$TARGET_IPv4" ] && echo -e "${GREEN}IPv4: $TARGET_IPv4${NC}"
-    [ -n "$TARGET_IPv6" ] && echo -e "${GREEN}IPv6: $TARGET_IPv6${NC}"
-    echo -e "\n   ${PURPLE}______${NC}"
-    echo -e " ${PURPLE}/${YELLOW}________${PURPLE}\\${NC}"
-    echo -e " ${PURPLE}|${CYAN}$hora${PURPLE}|${NC}"
-    echo -e " ${PURPLE}|${YELLOW}________${PURPLE}|${NC}"
+    centralizar "=============================="
+    centralizar " AutoRecon v1.2.4 - Status "
+    centralizar "=============================="
+    echo
+    # Seção: Metadados do Alvo
+    echo -e "${BLUE}Metadados do Alvo:${NC}"
+    echo -e "${CYAN}  Alvo: ${TARGET:-N/A} (${TYPE_TARGET:-N/A})${NC}"
+    [ -n "$TARGET_IPv4" ] && echo -e "${CYAN}  IPv4: $TARGET_IPv4${NC}"
+    [ -n "$TARGET_IPv6" ] && echo -e "${CYAN}  IPv6: $TARGET_IPv6${NC}"
+    [ -n "$URL_PROTOCOLO" ] && echo -e "${CYAN}  Protocolo: $URL_PROTOCOLO${NC}"
+    [ -n "$URL_PATH" ] && echo -e "${CYAN}  Path: $URL_PATH${NC}"
+    echo
+    # Seção: Teste em Andamento
+    echo -e "${BLUE}Teste em Andamento:${NC}"
+    centralizar "${YELLOW}$task${NC}"
+    echo
+    # Seção: Relógio
+    echo -e "${PURPLE}   ______${NC}"
+    echo -e "${PURPLE}  /${YELLOW}______${PURPLE}\\${NC}"
+    echo -e "${PURPLE} |${CYAN}$hora${PURPLE}|${NC}"
+    echo -e "${PURPLE} |${YELLOW}______${PURPLE}|${NC}"
     if [ "$frame" -eq 1 ]; then
-        echo -e " ${PURPLE}|${YELLOW}........${PURPLE}|${NC}"
-        echo -e " ${PURPLE}|${YELLOW}........${PURPLE}|${NC}"
+        echo -e "${PURPLE} |${YELLOW}......${PURPLE}|${NC}"
+        echo -e "${PURPLE} |${YELLOW}......${PURPLE}|${NC}"
     else
-        echo -e " ${PURPLE}|${YELLOW}        ${PURPLE}|${NC}"
-        echo -e " ${PURPLE}|${YELLOW}        ${PURPLE}|${NC}"
+        echo -e "${PURPLE} |${YELLOW}      ${PURPLE}|${NC}"
+        echo -e "${PURPLE} |${YELLOW}      ${PURPLE}|${NC}"
     fi
-    echo -e " ${PURPLE}\\ ${YELLOW}______${PURPLE} /${NC}"
-    echo -e "\n${WHITE}Executando: ${CYAN}$task${NC}"
-    echo -e "\n${GREEN}Checklist:${NC}"
+    echo -e "${PURPLE}  \\${YELLOW}______${PURPLE}/${NC}"
+    echo
+    # Seção: Checklist
+    echo -e "${BLUE}Checklist:${NC}"
+    local config_items=()
+    local network_items=()
+    local enum_items=()
     for item in "${CHECKLIST[@]}"; do
         item_sanitized=$(echo "$item" | sed 's/[^[:print:]]//g')
-        if [[ "$item_sanitized" == *"✓"* ]]; then
-            echo -e " ${GREEN}✔ $item_sanitized${NC}"
-        elif [[ "$item_sanitized" == *"✗"* ]]; then
-            echo -e " ${RED}✖ $item_sanitized${NC}"
-        elif [[ "$item_sanitized" == *"⚠"* ]]; then
-            echo -e " ${YELLOW}⚠ $item_sanitized${NC}"
-        else
-            echo -e " - $item_sanitized"
+        if [[ "$item_sanitized" =~ ^(URL completa|Domínio principal|Subdomínio|Protocolo|Path|Resolução IPv4|Resolução IPv6|Alvo definido): ]]; then
+            config_items+=("$item_sanitized")
+        elif [[ "$item_sanitized" =~ ^(Ping|Porta|Nmap|HTTP|Traceroute|DNS): ]]; then
+            network_items+=("$item_sanitized")
+        elif [[ "$item_sanitized" =~ ^(FFUF): ]]; then
+            enum_items+=("$item_sanitized")
         fi
     done
+    # Exibir Configuração do Alvo
+    if [ ${#config_items[@]} -gt 0 ]; then
+        echo -e "${WHITE}  Configuração do Alvo:${NC}"
+        for item in "${config_items[@]}"; do
+            if [[ "$item" == *"✓"* ]]; then
+                echo -e "${GREEN}    ✔ $item${NC}"
+            elif [[ "$item" == *"✗"* ]]; then
+                echo -e "${RED}    ✖ $item${NC}"
+            elif [[ "$item" == *"⚠"* ]]; then
+                echo -e "${YELLOW}    ⚠ $item${NC}"
+            else
+                echo -e "    - $item"
+            fi
+        done
+    fi
+    # Exibir Testes de Rede
+    if [ ${#network_items[@]} -gt 0 ]; then
+        echo -e "${WHITE}  Testes de Rede:${NC}"
+        for item in "${network_items[@]}"; do
+            if [[ "$item" == *"✓"* ]]; then
+                echo -e "${GREEN}    ✔ $item${NC}"
+            elif [[ "$item" == *"✗"* ]]; then
+                echo -e "${RED}    ✖ $item${NC}"
+            elif [[ "$item" == *"⚠"* ]]; then
+                echo -e "${YELLOW}    ⚠ $item${NC}"
+            else
+                echo -e "    - $item"
+            fi
+        done
+    fi
+    # Exibir Testes de Enumeração
+    if [ ${#enum_items[@]} -gt 0 ]; then
+        echo -e "${WHITE}  Testes de Enumeração:${NC}"
+        for item in "${enum_items[@]}"; do
+            if [[ "$item" == *"✓"* ]]; then
+                echo -e "${GREEN}    ✔ $item${NC}"
+            elif [[ "$item" == *"✗"* ]]; then
+                echo -e "${RED}    ✖ $item${NC}"
+            elif [[ "$item" == *"⚠"* ]]; then
+                echo -e "${YELLOW}    ⚠ $item${NC}"
+            else
+                echo -e "    - $item"
+            fi
+        done
+    fi
 }
 
 loading_clock() {
