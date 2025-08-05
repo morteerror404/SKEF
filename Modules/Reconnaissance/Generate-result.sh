@@ -12,24 +12,25 @@ declare -A TEST_FILES=(
     ["DNS"]="dig_output.txt"
     ["Traceroute"]="traceroute_output.txt"
     ["HTTP"]="http_test.txt"
+    ["HTTP Headers"]="curl_headers.txt"
     ["FFUF Subdomínios"]="ffuf_subdomains.csv"
     ["FFUF Web"]="ffuf_web.csv"
     ["FFUF Extensões"]="ffuf_extensions.csv"
-    ["Nmap IPv4 TCP Connect Scan"]="nmap_ipv4_nmap_${TARGET_IPv4}_-sT_-vv_-Pn.xml"
-    ["Nmap IPv4 OS Detection Scan"]="nmap_ipv4_nmap_${TARGET_IPv4}_-vv_-O_-Pn.xml"
-    ["Nmap IPv4 Service Version Scan"]="nmap_ipv4_nmap_${TARGET_IPv4}_-sV_-O_-vv_-Pn.xml"
-    ["Nmap IPv6 TCP Connect Scan"]="nmap_ipv6_nmap_${TARGET_IPv6}_-sT_-vv_-Pn.xml"
-    ["Nmap IPv6 OS Detection Scan"]="nmap_ipv6_nmap_${TARGET_IPv6}_-vv_-O_-Pn.xml"
-    ["Nmap IPv6 Service Version Scan"]="nmap_ipv6_nmap_${TARGET_IPv6}_-sV_-O_-vv_-Pn.xml"
+    ["Nmap IPv4 TCP Connect Scan"]="nmap_ipv4_nmap_{TARGET_IP}_-sT_-vv_-Pn.xml"
+    ["Nmap IPv4 OS Detection Scan"]="nmap_ipv4_nmap_{TARGET_IP}_-vv_-O_-Pn.xml"
+    ["Nmap IPv4 Service Version Scan"]="nmap_ipv4_nmap_{TARGET_IP}_-sV_-O_-vv_-Pn.xml"
+    ["Nmap IPv6 TCP Connect Scan"]="nmap_ipv6_nmap_{TARGET_IP}_-sT_-vv_-Pn.xml"
+    ["Nmap IPv6 OS Detection Scan"]="nmap_ipv6_nmap_{TARGET_IP}_-vv_-O_-Pn.xml"
+    ["Nmap IPv6 Service Version Scan"]="nmap_ipv6_nmap_{TARGET_IP}_-sV_-O_-vv_-Pn.xml"
 )
 
-declare -a BASIC_TESTS=("Ping" "DNS" "Porta" "HTTP" "Traceroute")
+declare -a BASIC_TESTS=("Ping" "DNS" "Porta" "HTTP" "Traceroute" "HTTP Headers")
 declare -a COMPLEX_TESTS=("Nmap IPv4" "Nmap IPv6" "FFUF Subdomínios" "FFUF Web" "FFUF Extensões")
 
 #------------#------------# FUNÇÕES AUXILIARES #------------#------------#
 sanitize_string() {
     local input="$1"
-    echo -n "$input" | tr -d '\n\r\t\0' | sed 's/[^[:print:]]//g' | sed 's/"/\\"/g' | sed "s/'/\\'/g" | sed 's/\\/\\\\/g'
+    echo -n "$input" | tr -d '\n\r\t\0' | sed 's/[^[:print:]]//g' | sed 's/"/\\"/g' | sed "s/'/\\'/g" | sed 's/\\/\\\\/g' | sed 's/#/\\#/g' | sed 's/*/\\*/g' | sed 's/_/\\_/g'
 }
 
 get_metadata() {
@@ -61,14 +62,16 @@ get_tool_config() {
         [ -n "$TARGET_IPv6" ] && config+="- $(sanitize_string "$(substituir_variaveis "$cmd" "$TARGET_IPv6")")\n"
     done
     config+="\n### FFUF\n"
+    local protocol=$(determinar_protocolo)
+    local target_url="$protocol://$TARGET"
     for cmd in "${FFUF_COMMANDS[@]}"; do
-        [ -n "$TARGET_IPv4" ] && config+="- $(sanitize_string "$(substituir_variaveis "$cmd" "$TARGET_IPv4")")\n"
+        config+="- $(sanitize_string "$(echo "$cmd" | sed "s|{URL}|$target_url|g")")\n"
     done
     for cmd in "${FFUF_WEB_COMMANDS[@]}"; do
-        [ -n "$TARGET_IPv4" ] && config+="- $(sanitize_string "$(substituir_variaveis "$cmd" "$TARGET_IPv4")")\n"
+        config+="- $(sanitize_string "$(echo "$cmd" | sed "s|{URL}|$target_url|g")")\n"
     done
     for cmd in "${FFUF_EXT_COMMANDS[@]}"; do
-        [ -n "$TARGET_IPv4" ] && config+="- $(sanitize_string "$(substituir_variaveis "$cmd" "$TARGET_IPv4")")\n"
+        config+="- $(sanitize_string "$(echo "$cmd" | sed "s|{URL}|$target_url|g")")\n"
     done
     config+="\n"
     echo -e "$config"
@@ -76,7 +79,7 @@ get_tool_config() {
 
 get_dependencies() {
     local deps="## Dependências\n\n"
-    for cmd in jq nmap ffuf dig traceroute curl nc xmllint; do
+    for cmd in jq nmap ffuf dig traceroute curl nc xmllint awk; do
         deps+="- **$cmd**: $(command -v $cmd &>/dev/null && echo "Instalado ($(sanitize_string "$($cmd --version 2>&1 | head -n1)")") || echo 'Não instalado')\n"
     done
     deps+="\n"
@@ -85,6 +88,10 @@ get_dependencies() {
 
 clean_intermediate_files() {
     print_status "info" "Removendo arquivos intermediários em $RESULTS_DIR..."
+    if [ ! -d "$RESULTS_DIR" ]; then
+        print_status "error" "Diretório $RESULTS_DIR não existe"
+        return 1
+    fi
     local temp_error_log=$(mktemp)
     if [ -f "$RESULTS_DIR/error.log" ]; then
         mv "$RESULTS_DIR/error.log" "$temp_error_log" 2>/dev/null || {
@@ -148,13 +155,15 @@ process_test_results() {
     local report_file="$RESULTS_DIR/relatorio.md"
     local basic_tests_written=0 complex_tests_written=0
 
-    # Inicializar relatório
+    # Verificar existência do diretório
     if ! [ -d "$RESULTS_DIR" ]; then
         mkdir -p "$RESULTS_DIR" 2>>"$RESULTS_DIR/error.log" || {
             print_status "error" "Falha ao criar diretório $RESULTS_DIR"
             return 1
         }
     fi
+
+    # Inicializar relatório
     echo -e "$(get_metadata)$(get_tool_config)$(get_dependencies)" > "$report_file" 2>>"$RESULTS_DIR/error.log" || {
         print_status "error" "Falha ao inicializar $report_file"
         return 1
@@ -188,6 +197,7 @@ process_test_results() {
         local test_name=$(echo "${parts[0]}" | xargs)
         local status=$(echo "${parts[1]}" | xargs)
         local message=$(echo "${parts[1]}" | cut -d' ' -f2- | xargs)
+        local time_elapsed=$(echo "$message" | grep -oP '\(\K\d+s(?=\))' || echo "N/A")
         local details=""
         local file_content=""
 
@@ -207,90 +217,58 @@ process_test_results() {
                 local cmd_ipv6=$(sanitize_string "ping6 -c 4 $TARGET_IPv6")
                 local packet_loss=$(echo "$message" | grep -oP '\d+(?=% packet loss)' || echo "N/A")
                 local avg_latency=$(echo "$message" | grep -oP '[\d.]+(?=ms)' || echo "N/A")
-                details="  - Comando IPv4: $cmd_ipv4\n  - Comando IPv6: $cmd_ipv6\n  - Perda de Pacotes: $packet_loss\n  - Latência Média: $avg_latency"
+                details="  - Comando IPv4: $cmd_ipv4\n  - Comando IPv6: $cmd_ipv6\n  - Perda de Pacotes: $packet_loss\n  - Latência Média: $avg_latency\n  - Tempo Decorrido: $time_elapsed"
                 ;;
             "DNS"*)
                 local cmd=$(sanitize_string "dig $TARGET ANY +short")
-                local resolved_ips=$(echo "$message" | grep -oP '[\d.,:a-fA-F]+$' || echo "N/A")
-                details="  - Comando: $cmd\n  - IPs Resolvidos: $resolved_ips\n  - Arquivo: ${TEST_FILES["DNS"]}"
+                local resolved_ips=$(echo "$message" | grep -oP '[\d.,:a-fA-F]+(?=,\s*\d+s)' || echo "N/A")
+                details="  - Comando: $cmd\n  - IPs Resolvidos: $resolved_ips\n  - Arquivo: ${TEST_FILES["DNS"]}\n  - Tempo Decorrido: $time_elapsed"
                 [ -f "$RESULTS_DIR/${TEST_FILES["DNS"]}" ] && file_content=$(head -n 20 "$RESULTS_DIR/${TEST_FILES["DNS"]}" | sed 's/^/    /')
                 ;;
             "Porta"*)
                 local port=$(echo "$test_name" | grep -oP '\d+')
                 local cmd_ipv4=$(sanitize_string "nc -zv -w 2 $TARGET_IPv4 $port")
                 local cmd_ipv6=$(sanitize_string "nc -zv -w 2 $TARGET_IPv6 $port")
-                details="  - Porta: $port\n  - Comando IPv4: $cmd_ipv4\n  - Comando IPv6: $cmd_ipv6"
+                details="  - Porta: $port\n  - Comando IPv4: $cmd_ipv4\n  - Comando IPv6: $cmd_ipv6\n  - Tempo Decorrido: $time_elapsed"
                 ;;
-            "HTTP"*)
-                local protocol=$(echo "$test_name" | grep -oP '\((https?)\)' | tr -d '()')
-                [ -z "$protocol" ] && protocol=$(determinar_protocolo)
-                
-                # Comando para pegar headers
+            "HTTP"*|"HTTP Headers"*)
+                local protocol=$(determinar_protocolo)
                 local cmd_headers=$(sanitize_string "curl -sI $protocol://$TARGET")
-                # Comando para pegar conteúdo HTML
-                local cmd_html=$(sanitize_string "curl -s $protocol://$TARGET")
-                
-                details="  - Comando headers: $cmd_headers\n  - Comando HTML: $cmd_html\n  - Arquivo: ${TEST_FILES["HTTP"]}"
-                
-                if [ -f "$RESULTS_DIR/${TEST_FILES["HTTP"]}" ]; then
-                    # Extrair headers HTTP
-                    local headers_content=$(grep -E '^HTTP|^[A-Za-z-]+:' "$RESULTS_DIR/${TEST_FILES["HTTP"]}" | head -n 15)
-                    
-                    # Extrair a seção <head> do HTML
-                    local head_content=$(grep -i -A20 '<head' "$RESULTS_DIR/${TEST_FILES["HTTP"]}" | grep -i -B20 '</head>')
-                    
-                    # Montar o conteúdo completo
-                    file_content=""
-                    
-                    if [ -n "$headers_content" ]; then
-                        file_content+="    === HEADERS HTTP ===\n"
-                        file_content+="    $(echo "$headers_content" | sed 's/^/    /')\n\n"
-                    fi
-                    
-                    if [ -n "$head_content" ]; then
-                        file_content+="    === HEAD HTML ===\n"
-                        file_content+="    $(echo "$head_content" | sed 's/^/    /')"
-                    fi
-                    
-                    if [ -z "$file_content" ]; then
-                        file_content="    Nenhum header HTTP ou conteúdo HEAD encontrado"
-                    fi
+                details="  - Comando: $cmd_headers\n  - Arquivo: ${TEST_FILES["$test_name"]}\n  - Tempo Decorrido: $time_elapsed"
+                if [ -f "$RESULTS_DIR/${TEST_FILES["$test_name"]}" ]; then
+                    file_content=$(grep -E '^HTTP|^[A-Za-z-]+:' "$RESULTS_DIR/${TEST_FILES["$test_name"]}" | head -n 15 | sed 's/^/    /')
+                    [ -z "$file_content" ] && file_content="    Nenhum header HTTP encontrado"
                 fi
                 ;;
             "Traceroute"*)
                 local cmd=$(sanitize_string "traceroute $TARGET_IPv4")
-                details="  - Comando: $cmd\n  - Arquivo: ${TEST_FILES["Traceroute"]}"
+                details="  - Comando: $cmd\n  - Arquivo: ${TEST_FILES["Traceroute"]}\n  - Tempo Decorrido: $time_elapsed"
                 [ -f "$RESULTS_DIR/${TEST_FILES["Traceroute"]}" ] && file_content=$(head -n 20 "$RESULTS_DIR/${TEST_FILES["Traceroute"]}" | sed 's/^/    /')
                 ;;
             "Nmap IPv4"*|"Nmap IPv6"*)
                 local scan_type=$(echo "$test_name" | sed 's/Nmap IPv[46] //')
                 local ip_version="IPv4"
                 [[ "$test_name" == *"IPv6"* ]] && ip_version="IPv6"
-                
+                local ip_addr="${TARGET_IPv4}"
+                [[ "$ip_version" == "IPv6" ]] && ip_addr="${TARGET_IPv6}"
                 local cmd=""
                 case "$scan_type" in
                     "TCP Connect Scan") cmd_index=0 ;;
                     "OS Detection Scan") cmd_index=1 ;;
                     "Service Version Scan") cmd_index=2 ;;
                 esac
-                
                 if [ "$ip_version" = "IPv4" ]; then
-                    cmd=$(sanitize_string "$(substituir_variaveis "${NMAP_COMMANDS_IPV4[$cmd_index]}" "$TARGET_IPv4")")
+                    cmd=$(sanitize_string "$(substituir_variaveis "${NMAP_COMMANDS_IPV4[$cmd_index]}" "$ip_addr")")
                 else
-                    cmd=$(sanitize_string "$(substituir_variaveis "${NMAP_COMMANDS_IPV6[$cmd_index]}" "$TARGET_IPv6")")
+                    cmd=$(sanitize_string "$(substituir_variaveis "${NMAP_COMMANDS_IPV6[$cmd_index]}" "$ip_addr")")
                 fi
-                
-                details="  - Comando: $cmd\n  - Arquivo de Resultados: ${TEST_FILES["Nmap $ip_version $scan_type"]}"
-                
-                if [ -f "$RESULTS_DIR/${TEST_FILES["Nmap $ip_version $scan_type"]}" ]; then
+                local file_name=$(echo "${TEST_FILES["Nmap $ip_version $scan_type"]}" | sed "s/{TARGET_IP}/$ip_addr/g")
+                details="  - Comando: $cmd\n  - Arquivo de Resultados: $file_name\n  - Tempo Decorrido: $time_elapsed"
+                if [ -f "$RESULTS_DIR/$file_name" ]; then
                     if command -v xmllint &>/dev/null; then
-                        file_content=$(xmllint --xpath '//host/ports/port' \
-                            "$RESULTS_DIR/${TEST_FILES["Nmap $ip_version $scan_type"]}" 2>/dev/null | \
-                            head -n 30 | sed 's/^/    /')
+                        file_content=$(xmllint --xpath '//host/ports/port' "$RESULTS_DIR/$file_name" 2>/dev/null | head -n 30 | sed 's/^/    /')
                     else
-                        file_content=$(grep -A5 '<port protocol=' \
-                            "$RESULTS_DIR/${TEST_FILES["Nmap $ip_version $scan_type"]}" | \
-                            head -n 30 | sed 's/^/    /')
+                        file_content=$(grep -A5 '<port protocol=' "$RESULTS_DIR/$file_name" | head -n 30 | sed 's/^/    /')
                     fi
                     [ -z "$file_content" ] && file_content="    Nenhuma porta aberta encontrada"
                 fi
@@ -300,11 +278,15 @@ process_test_results() {
                 local target_url="$protocol://$TARGET"
                 local cmd=$(echo "${FFUF_COMMANDS[0]}" | sed "s|{URL}|$target_url|g")
                 cmd=$(sanitize_string "$cmd")
-                details="  - Comando: $cmd\n  - Arquivo de Resultados: ${TEST_FILES["FFUF Subdomínios"]}"
+                details="  - Comando: $cmd\n  - Arquivo de Resultados: ${TEST_FILES["FFUF Subdomínios"]}\n  - Tempo Decorrido: $time_elapsed"
                 if [ -f "$RESULTS_DIR/${TEST_FILES["FFUF Subdomínios"]}" ]; then
-                    file_content=$(awk -F',' 'NR==1 {print "| " $0 " |"} 
-                        NR==1 {gsub(/,/," | "); print "|---" $0 "---|"} 
-                        NR>1 {print "| " $0 " |"}' "$RESULTS_DIR/${TEST_FILES["FFUF Subdomínios"]}" 2>/dev/null | head -n 20)
+                    if command -v awk &>/dev/null; then
+                        file_content=$(awk -F',' 'NR==1 {print "| " $0 " |"} 
+                            NR==1 {gsub(/,/," | "); print "|---" $0 "---|"} 
+                            NR>1 {print "| " $0 " |"}' "$RESULTS_DIR/${TEST_FILES["FFUF Subdomínios"]}" 2>/dev/null | head -n 20)
+                    else
+                        file_content="    awk não instalado, não foi possível processar CSV"
+                    fi
                 fi
                 ;;
             "FFUF Web")
@@ -312,11 +294,15 @@ process_test_results() {
                 local target_url="$protocol://$TARGET"
                 local cmd=$(echo "${FFUF_WEB_COMMANDS[0]}" | sed "s|{URL}|$target_url|g")
                 cmd=$(sanitize_string "$cmd")
-                details="  - Comando: $cmd\n  - Arquivo de Resultados: ${TEST_FILES["FFUF Web"]}"
+                details="  - Comando: $cmd\n  - Arquivo de Resultados: ${TEST_FILES["FFUF Web"]}\n  - Tempo Decorrido: $time_elapsed"
                 if [ -f "$RESULTS_DIR/${TEST_FILES["FFUF Web"]}" ]; then
-                    file_content=$(awk -F',' 'NR==1 {print "| " $0 " |"} 
-                        NR==1 {gsub(/,/," | "); print "|---" $0 "---|"} 
-                        NR>1 {print "| " $0 " |"}' "$RESULTS_DIR/${TEST_FILES["FFUF Web"]}" 2>/dev/null | head -n 20)
+                    if command -v awk &>/dev/null; then
+                        file_content=$(awk -F',' 'NR==1 {print "| " $0 " |"} 
+                            NR==1 {gsub(/,/," | "); print "|---" $0 "---|"} 
+                            NR>1 {print "| " $0 " |"}' "$RESULTS_DIR/${TEST_FILES["FFUF Web"]}" 2>/dev/null | head -n 20)
+                    else
+                        file_content="    awk não instalado, não foi possível processar CSV"
+                    fi
                 fi
                 ;;
             "FFUF Extensões")
@@ -324,15 +310,19 @@ process_test_results() {
                 local target_url="$protocol://$TARGET"
                 local cmd=$(echo "${FFUF_EXT_COMMANDS[0]}" | sed "s|{URL}|$target_url|g")
                 cmd=$(sanitize_string "$cmd")
-                details="  - Comando: $cmd\n  - Arquivo de Resultados: ${TEST_FILES["FFUF Extensões"]}"
+                details="  - Comando: $cmd\n  - Arquivo de Resultados: ${TEST_FILES["FFUF Extensões"]}\n  - Tempo Decorrido: $time_elapsed"
                 if [ -f "$RESULTS_DIR/${TEST_FILES["FFUF Extensões"]}" ]; then
-                    file_content=$(awk -F',' 'NR==1 {print "| " $0 " |"} 
-                        NR==1 {gsub(/,/," | "); print "|---" $0 "---|"} 
-                        NR>1 {print "| " $0 " |"}' "$RESULTS_DIR/${TEST_FILES["FFUF Extensões"]}" 2>/dev/null | head -n 20)
+                    if command -v awk &>/dev/null; then
+                        file_content=$(awk -F',' 'NR==1 {print "| " $0 " |"} 
+                            NR==1 {gsub(/,/," | "); print "|---" $0 "---|"} 
+                            NR>1 {print "| " $0 " |"}' "$RESULTS_DIR/${TEST_FILES["FFUF Extensões"]}" 2>/dev/null | head -n 20)
+                    else
+                        file_content="    awk não instalado, não foi possível processar CSV"
+                    fi
                 fi
                 ;;
             *)
-                details="  - Comando: N/A\n  - Arquivo de Resultados: N/A"
+                details="  - Comando: N/A\n  - Arquivo de Resultados: N/A\n  - Tempo Decorrido: $time_elapsed"
                 ;;
         esac
 
@@ -368,6 +358,12 @@ process_result_files() {
     local files_processed=0
     declare -A processed_files
 
+    # Verificar existência do diretório
+    if ! [ -d "$RESULTS_DIR" ]; then
+        print_status "error" "Diretório $RESULTS_DIR não existe"
+        return 1
+    fi
+
     # Adicionar seção de arquivos de resultados
     echo -e "\n## Arquivos de Resultados\n" >> "$report_file" 2>>"$RESULTS_DIR/error.log" || {
         print_status "error" "Falha ao escrever seção de arquivos em $report_file"
@@ -386,13 +382,14 @@ process_result_files() {
             echo -e "### ${tool_name}: $(basename "$xml_file")\n" >> "$report_file"
             
             if command -v xmllint &>/dev/null; then
-                xmllint --xpath '//host/ports/port' "$xml_file" 2>/dev/null | \
-                    head -n 30 | sed 's/^/    /' >> "$report_file"
+                local content=$(xmllint --xpath '//host/ports/port' "$xml_file" 2>/dev/null | head -n 30 | sed 's/^/    /')
+                [ -z "$content" ] && content="    Nenhuma porta aberta encontrada"
+                echo -e "\`\`\`xml\n$content\n\`\`\`\n" >> "$report_file"
             else
-                grep -A5 '<port protocol=' "$xml_file" | \
-                    head -n 30 | sed 's/^/    /' >> "$report_file"
+                local content=$(grep -A5 '<port protocol=' "$xml_file" | head -n 30 | sed 's/^/    /')
+                [ -z "$content" ] && content="    Nenhuma porta aberta encontrada"
+                echo -e "\`\`\`xml\n$content\n\`\`\`\n" >> "$report_file"
             fi
-            echo >> "$report_file"
             processed_files["$xml_file"]=1
             ((files_processed++))
         fi
@@ -400,7 +397,9 @@ process_result_files() {
 
     # Processar arquivos mapeados por TEST_FILES
     for test_name in "${!TEST_FILES[@]}"; do
-        local file="$RESULTS_DIR/${TEST_FILES[$test_name]}"
+        local file_name="${TEST_FILES[$test_name]}"
+        file_name=$(echo "$file_name" | sed "s/{TARGET_IP}/${TARGET_IPv4:-$TARGET_IPv6}/g")
+        local file="$RESULTS_DIR/$file_name"
         if [ -f "$file" ] && [ -z "${processed_files[$file]}" ]; then
             local file_name=$(basename "$file")
             local file_type="${file_name##*.}"
@@ -411,18 +410,21 @@ process_result_files() {
                     content=$(head -n 30 "$file" 2>/dev/null | sed 's/^/    /')
                     ;;
                 "csv")
-                    content=$(awk -F',' 'NR==1 {print "| " $0 " |"} 
-                        NR==1 {gsub(/,/," | "); print "|---" $0 "---|"} 
-                        NR>1 {print "| " $0 " |"}' "$file" 2>/dev/null | head -n 20)
+                    if command -v awk &>/dev/null; then
+                        content=$(awk -F',' 'NR==1 {print "| " $0 " |"} 
+                            NR==1 {gsub(/,/," | "); print "|---" $0 "---|"} 
+                            NR>1 {print "| " $0 " |"}' "$file" 2>/dev/null | head -n 20)
+                    else
+                        content="    awk não instalado, não foi possível processar CSV"
+                    fi
                     ;;
                 "xml")
                     if command -v xmllint &>/dev/null; then
-                        content=$(xmllint --xpath '//host/ports/port' "$file" 2>/dev/null | \
-                            head -n 30 | sed 's/^/    /')
+                        content=$(xmllint --xpath '//host/ports/port' "$file" 2>/dev/null | head -n 30 | sed 's/^/    /')
                     else
-                        content=$(grep -A5 '<port protocol=' "$file" | \
-                            head -n 30 | sed 's/^/    /')
+                        content=$(grep -A5 '<port protocol=' "$file" | head -n 30 | sed 's/^/    /')
                     fi
+                    [ -z "$content" ] && content="    Nenhuma porta aberta encontrada"
                     ;;
             esac
             
@@ -449,18 +451,21 @@ process_result_files() {
                     content=$(head -n 30 "$file" 2>/dev/null | sed 's/^/    /')
                     ;;
                 "csv")
-                    content=$(awk -F',' 'NR==1 {print "| " $0 " |"} 
-                        NR==1 {gsub(/,/," | "); print "|---" $0 "---|"} 
-                        NR>1 {print "| " $0 " |"}' "$file" 2>/dev/null | head -n 20)
+                    if command -v awk &>/dev/null; then
+                        content=$(awk -F',' 'NR==1 {print "| " $0 " |"} 
+                            NR==1 {gsub(/,/," | "); print "|---" $0 "---|"} 
+                            NR>1 {print "| " $0 " |"}' "$file" 2>/dev/null | head -n 20)
+                    else
+                        content="    awk não instalado, não foi possível processar CSV"
+                    fi
                     ;;
                 "xml")
                     if command -v xmllint &>/dev/null; then
-                        content=$(xmllint --xpath '//host/ports/port' "$file" 2>/dev/null | \
-                            head -n 30 | sed 's/^/    /')
+                        content=$(xmllint --xpath '//host/ports/port' "$file" 2>/dev/null | head -n 30 | sed 's/^/    /')
                     else
-                        content=$(grep -A5 '<port protocol=' "$file" | \
-                            head -n 30 | sed 's/^/    /')
+                        content=$(grep -A5 '<port protocol=' "$file" | head -n 30 | sed 's/^/    /')
                     fi
+                    [ -z "$content" ] && content="    Nenhuma porta aberta encontrada"
                     ;;
             esac
             

@@ -4,8 +4,18 @@
 # Função: Controlador principal, gerencia menus, chama testes e organiza resultados para Generate-result.sh
 # Dependências: utils.sh, ativo.sh, Generate-result.sh
 
+if [ ! -f "./utils.sh" ]; then
+    echo "[✗] Arquivo utils.sh não encontrado."
+    exit 1
+fi
 source ./utils.sh
+
+if [ ! -f "./ativo.sh" ]; then
+    print_status "error" "Arquivo ativo.sh não encontrado."
+    exit 1
+fi
 source ./ativo.sh
+
 # source ./passivo.sh  
 # Descomentar quando passivo.sh estiver implementado
 
@@ -49,7 +59,7 @@ clean_results() {
 }
 
 verificar_tipo_alvo() {
-    local entrada=$(echo "$1" | sed -E 's|^https?://||; s|/.*$||; s|:[0-9]+$||')
+    local entrada=$(printf '%q' "$1" | sed -E 's|^https?://||; s|/.*$||; s|:[0-9]+$||')
     if [[ $entrada =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
         echo "IP"
     elif [[ $entrada =~ ^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$ ]]; then
@@ -60,9 +70,13 @@ verificar_tipo_alvo() {
         echo "INVÁLIDO"
     fi
 }
+
 definir_alvo() {
     print_status "action" "Definindo alvo"
     read -p "Digite o IP, domínio ou URL alvo: " TARGET
+    
+    # Sanitizar entrada
+    TARGET=$(printf '%q' "$TARGET")
     
     # Limpeza inicial da URL
     URL_ORIGINAL="$TARGET"
@@ -148,39 +162,55 @@ definir_alvo() {
 
 #------------#------------# FUNÇÕES DE TESTE #------------#------------#
 test_dig() {
-    print_status "action" "Executando teste DNS com dig"
+    local start_time=$(date +%s)
+    local start_time_display=$(date +"%H:%M:%S")
+    print_status "action" "Executando teste DNS com dig (iniciado às $start_time_display)"
     local output_file="$RESULTS_DIR/dig_output.txt"
     local dig_result=$(dig "$TARGET" ANY +short >"$output_file" 2>&1)
+    local end_time=$(date +%s)
+    local elapsed=$((end_time - start_time))
     if [ $? -eq 0 ]; then
         local resolved_ips=$(cat "$output_file" | grep -oP '(\d+\.\d+\.\d+\.\d+|[:0-9a-fA-F]+)' | tr '\n' ',' | sed 's/,$//')
-        [ -n "$resolved_ips" ] && CHECKLIST+=("DNS: ✓ IPs resolvidos ($resolved_ips)") || CHECKLIST+=("DNS: ✗ Nenhum IP resolvido")
+        [ -n "$resolved_ips" ] && CHECKLIST+=("DNS: ✓ IPs resolvidos ($resolved_ips, ${elapsed}s)") || CHECKLIST+=("DNS: ✗ Nenhum IP resolvido (${elapsed}s)")
     else
-        CHECKLIST+=("DNS: ✗ Falha")
+        CHECKLIST+=("DNS: ✗ Falha (${elapsed}s)")
     fi
 }
 
 test_traceroute() {
-    print_status "action" "Executando traceroute"
+    local start_time=$(date +%s)
+    local start_time_display=$(date +"%H:%M:%S")
+    print_status "action" "Executando traceroute (iniciado às $start_time_display)"
     local output_file="$RESULTS_DIR/traceroute_output.txt"
     local traceroute_cmd="traceroute $TARGET_IPv4" && [ -n "$TARGET_IPv6" ] && traceroute_cmd="traceroute6 $TARGET_IPv6"
     local traceroute_result=$($traceroute_cmd >"$output_file" 2>&1)
+    local end_time=$(date +%s)
+    local elapsed=$((end_time - start_time))
     if [ $? -eq 0 ]; then
-        CHECKLIST+=("Traceroute: ✓ Sucesso")
+        CHECKLIST+=("Traceroute: ✓ Sucesso (${elapsed}s)")
     else
-        CHECKLIST+=("Traceroute: ✗ Falha")
+        CHECKLIST+=("Traceroute: ✗ Falha (${elapsed}s)")
     fi
 }
 
 test_curl_headers() {
-    print_status "action" "Verificando headers HTTP com curl"
+    if [ "$TYPE_TARGET" != "DOMAIN" ]; then
+        CHECKLIST+=("HTTP Headers: ✗ Teste requer domínio")
+        return
+    fi
+    local start_time=$(date +%s)
+    local start_time_display=$(date +"%H:%M:%S")
+    print_status "action" "Verificando headers HTTP com curl (iniciado às $start_time_display)"
     local output_file="$RESULTS_DIR/curl_headers.txt"
     local protocol=$(determinar_protocolo)
     local curl_result=$(curl -sI "$protocol://$TARGET" >"$output_file" 2>&1)
+    local end_time=$(date +%s)
+    local elapsed=$((end_time - start_time))
     if [ $? -eq 0 ]; then
         local http_code=$(head -1 "$output_file" | cut -d' ' -f2)
-        CHECKLIST+=("HTTP Headers ($protocol): ✓ Código $http_code")
+        CHECKLIST+=("HTTP Headers ($protocol): ✓ Código $http_code (${elapsed}s)")
     else
-        CHECKLIST+=("HTTP Headers ($protocol): ✗ Falha")
+        CHECKLIST+=("HTTP Headers ($protocol): ✗ Falha (${elapsed}s)")
     fi
 }
 
@@ -219,8 +249,16 @@ menu_personalizado() {
                     6) test_traceroute ;;
                     7) test_curl_headers ;;
                 esac
-                source ./Generate-result.sh
-                save_report
+                if [ -f "./Generate-result.sh" ]; then
+                    source ./Generate-result.sh
+                    if declare -f save_report >/dev/null; then
+                        save_report
+                    else
+                        print_status "error" "Função save_report não encontrada em Generate-result.sh."
+                    fi
+                else
+                    print_status "error" "Arquivo Generate-result.sh não encontrado."
+                fi
                 ;;
             8) break ;;
             *) print_status "error" "Opção inválida" ;;
@@ -250,7 +288,7 @@ menu_inicial() {
     while true; do
         clear
         centralizar "=============================="
-        centralizar "      AUTORECON v1.2.4      "
+        centralizar "      AUTORECON v1.3.0      "
         centralizar "=============================="
         echo
         centralizar "1. Ativo"
@@ -263,10 +301,31 @@ menu_inicial() {
                 definir_alvo
                 [ "$TYPE_TARGET" = "INVÁLIDO" ] && continue
                 print_status "action" "Executando Reconhecimento Ativo..."
+                if ! declare -f Ativo_basico >/dev/null; then
+                    print_status "error" "Função Ativo_basico não encontrada."
+                    continue
+                fi
+                if ! declare -f Ativo_complexo >/dev/null; then
+                    print_status "error" "Função Ativo_complexo não encontrada."
+                    continue
+                fi
                 Ativo_basico
                 Ativo_complexo
-                source ./Generate-result.sh
-                save_report
+                if [ -f "./Generate-result.sh" ]; then
+                    source ./Generate-result.sh
+                    if declare -f save_report >/dev/null; then
+                        save_report
+                    else
+                        print_status "error" "Função save_report não encontrada em Generate-result.sh."
+                    fi
+                else
+                    print_status "error" "Arquivo Generate-result.sh não encontrado."
+                fi
+                read -p "[+] Deseja sair do programa? (s/n): " sair
+                if [[ "$sair" =~ ^[sS]$ ]]; then
+                    print_status "info" "Saindo..."
+                    exit 0
+                fi
                 ;;
             2)
                 menu_personalizado
