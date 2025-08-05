@@ -13,6 +13,11 @@ TARGET=""
 TARGET_IPv4=""
 TARGET_IPv6=""
 TYPE_TARGET=""
+URL_PROTOCOLO=""
+URL_SUB_DOMINIO=""
+URL_DOMINIO=""
+URL_PATH=""
+URL_PORT=""
 CHECKLIST=()
 START_TIME=$(date +%s)
 RESULTS_DIR="results"
@@ -54,17 +59,69 @@ verificar_tipo_alvo() {
         echo "INVÁLIDO"
     fi
 }
-
 definir_alvo() {
     print_status "action" "Definindo alvo"
     read -p "Digite o IP, domínio ou URL alvo: " TARGET
+    
+    # Limpeza inicial da URL
+    URL_ORIGINAL="$TARGET"
+    URL_PROTOCOLO=""
+    URL_SUB_DOMINIO=""
+    URL_DOMINIO=""
+    URL_PATH=""
+    URL_PORT=""
+    
+    # Extrair protocolo se existir
+    if [[ "$TARGET" =~ ^(https?://)([^/:]+) ]]; then
+        URL_PROTOCOLO="${BASH_REMATCH[1]}"
+        TARGET="${TARGET#${BASH_REMATCH[1]}}"
+    fi
+    
+    # Extrair porta se existir
+    if [[ "$TARGET" =~ ^([^:]+):([0-9]+) ]]; then
+        URL_PORT=":${BASH_REMATCH[2]}"
+        TARGET="${BASH_REMATCH[1]}"
+    fi
+    
+    # Extrair path se existir
+    if [[ "$TARGET" =~ ^([^/]+)(/.*) ]]; then
+        URL_PATH="${BASH_REMATCH[2]}"
+        TARGET="${BASH_REMATCH[1]}"
+    fi
+    
+    # Processar domínio e subdomínio
+    if [[ "$TARGET" =~ ^(([^\.]+)\.)?([^\.]+\.[^\.]+)$ ]]; then
+        URL_SUB_DOMINIO="${BASH_REMATCH[2]}"
+        URL_DOMINIO="${BASH_REMATCH[3]}"
+    else
+        URL_DOMINIO="$TARGET"
+    fi
+    
+    # Verificar tipo de alvo
     TYPE_TARGET=$(verificar_tipo_alvo "$TARGET")
     if [ "$TYPE_TARGET" = "INVÁLIDO" ]; then
         print_status "error" "Entrada inválida. Digite um IP, domínio ou URL válido."
         CHECKLIST+=("Alvo definido: ✗ Entrada inválida")
         return 1
     fi
-    TARGET=$(echo "$TARGET" | sed -E 's|^https?://||; s|/.*$||; s|:[0-9]+$||')
+    
+    # Para URLs, formatar saídas para ffuf
+    if [ -n "$URL_PROTOCOLO" ]; then
+        # Remover barras do protocolo para armazenamento
+        URL_PROTOCOLO=${URL_PROTOCOLO%/}
+        CHECKLIST+=("URL completa: ✓ ${URL_PROTOCOLO}://${TARGET}${URL_PORT}${URL_PATH}")
+        [ -n "$URL_SUB_DOMINIO" ] && CHECKLIST+=("Subdomínio: ✓ $URL_SUB_DOMINIO")
+        CHECKLIST+=("Domínio principal: ✓ $URL_DOMINIO")
+        CHECKLIST+=("Protocolo: ✓ $URL_PROTOCOLO")
+        [ -n "$URL_PORT" ] && CHECKLIST+=("Porta: ✓ $URL_PORT")
+        [ -n "$URL_PATH" ] && CHECKLIST+=("Path: ✓ $URL_PATH")
+        
+        # Formatar para ffuf
+        FFUF_DOMAIN="${URL_SUB_DOMINIO}.${URL_DOMINIO}"
+        FFUF_URL="${URL_PROTOCOLO}://${FFUF_DOMAIN}${URL_PORT}"
+    fi
+    
+    # Resolução DNS para domínios
     if [ "$TYPE_TARGET" = "DOMAIN" ]; then
         if ! dig +short A "$TARGET" &>/dev/null; then
             print_status "error" "Falha ao resolver DNS. Verifique a conectividade ou o domínio."
@@ -82,6 +139,11 @@ definir_alvo() {
     else
         TARGET_IPv4="$TARGET"
         CHECKLIST+=("Alvo definido: ✓ $TARGET (IPv4)")
+    fi
+    
+    # Adicionar variáveis globais para uso posterior
+    if [ -n "$URL_PROTOCOLO" ]; then
+        export URL_ORIGINAL URL_PROTOCOLO URL_SUB_DOMINIO URL_DOMINIO URL_PATH URL_PORT FFUF_DOMAIN FFUF_URL
     fi
 }
 

@@ -9,6 +9,7 @@ export -f determinar_protocolo
 
 #------------#------------# VARIÁVEIS GLOBAIS #------------#------------#
 WORDLISTS_DIR="/home/wordlists"
+WORDLIST_SUBDOMAINS="/home/wordlists/SecLists/Discovery/DNS/subdomains-top1million-110000.txt"
 declare -A PORT_STATUS_IPV4
 declare -A PORT_STATUS_IPV6
 declare -A PORT_TESTS_IPV4
@@ -27,13 +28,13 @@ NMAP_COMMANDS_IPV6=(
     "nmap -6 {TARGET_IP} -sV -O -vv -Pn"
 )
 FFUF_COMMANDS=(
-    "ffuf -u {URL}/ -H \"Host: FUZZ.{TARGET}\" -w {WORDLIST_SUBDOMAINS} -mc 200,301,302 -o $RESULTS_DIR/ffuf_subdomains.csv -of csv"
+    "ffuf -u {URL}/ -H Host: FUZZ.{DOMINIO} -w {WORDLIST_SUBDOMAINS} -mc 200,301,302 -fc 404 -timeout 10 -o $RESULTS_DIR/ffuf_subdomains.csv -of csv"
 )
 FFUF_WEB_COMMANDS=(
-    "ffuf -u {URL}/FUZZ -w {WORDLIST_WEB} -mc 200,301,302 -o $RESULTS_DIR/ffuf_web.csv -of csv"
+    "ffuf -u {URL}/FUZZ -w {WORDLIST_WEB} -mc 200,301,302 -recursion -recursion-depth 3 -fc 404 -timeout 10 -o $RESULTS_DIR/ffuf_web.csv -of csv"
 )
 FFUF_EXT_COMMANDS=(
-    "ffuf -u {URL}/index.FUZZ -w $WORDLISTS_DIR/SecLists/Discovery/Web-Content/web-extensions.txt -mc 200,301,302 -o $RESULTS_DIR/ffuf_extensions.csv -of csv"
+    "ffuf -u {URL}/index.FUZZ -w $WORDLISTS_DIR/SecLists/Discovery/Web-Content/web-extensions.txt -mc 200,301,302 -timeout 10 -fc 404 -o $RESULTS_DIR/ffuf_extensions.csv -of csv"
 )
 
 #------------#------------# FUNÇÕES AUXILIARES #------------#------------#
@@ -71,6 +72,7 @@ substituir_variaveis() {
     local safe_wordlist_web=$(echo "$wordlist_web" | sed 's/[^a-zA-Z0-9./-]/_/g')
     # Usar delimitador alternativo (#) para evitar conflitos com / ou :
     echo "$cmd" | sed \
+        -e "s#{DOMINIO}#$URL_DOMINIO#g"\
         -e "s#{TARGET}#$safe_target#g" \
         -e "s#{TARGET_IP}#$safe_ip#g" \
         -e "s#{URL}#$safe_url#g" \
