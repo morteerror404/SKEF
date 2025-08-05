@@ -73,7 +73,7 @@ definir_alvo() {
     
     # Extrair protocolo se existir
     if [[ "$TARGET" =~ ^(https?://)([^/:]+) ]]; then
-        URL_PROTOCOLO="${BASH_REMATCH[1]}"
+        URL_PROTOCOLO="${BASH_REMATCH[1]%%://*}"  # Extrai apenas 'http' ou 'https'
         TARGET="${TARGET#${BASH_REMATCH[1]}}"
     fi
     
@@ -107,8 +107,6 @@ definir_alvo() {
     
     # Para URLs, formatar saídas para ffuf
     if [ -n "$URL_PROTOCOLO" ]; then
-        # Remover barras do protocolo para armazenamento
-        URL_PROTOCOLO=${URL_PROTOCOLO%/}
         CHECKLIST+=("URL completa: ✓ ${URL_PROTOCOLO}://${TARGET}${URL_PORT}${URL_PATH}")
         [ -n "$URL_SUB_DOMINIO" ] && CHECKLIST+=("Subdomínio: ✓ $URL_SUB_DOMINIO")
         CHECKLIST+=("Domínio principal: ✓ $URL_DOMINIO")
