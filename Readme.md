@@ -52,20 +52,7 @@ sudo ./install.sh
 
 ```python
 git clone https://github.com/morteerror404/SKEF/blob/main/Scripts/requirements.txt
-sudo pip install -r requirements.txt
-```   ```
----
-
-## 🏁 Uso Básico
-### Exemplo 1: Reconhecimento Inicial
-```bash
-python3 modules/reconnaissance/amass_scan.py -t alvo.com
-```
-
-### Exemplo 2: Exploração de Vulnerabilidade
-```bash
-python3 modules/exploitation/cve_2023_1234.py -i 192.168.1.1
-```
+```   
 
 ---
 

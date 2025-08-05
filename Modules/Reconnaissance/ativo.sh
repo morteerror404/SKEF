@@ -61,6 +61,7 @@ substituir_variaveis() {
         wordlist_subdomains="/tmp/subdomains.txt"
         curl -s https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-5000.txt -o "$wordlist_subdomains" || {
             print_status "error" "Falha ao baixar wordlist de subdomínios"
+            echo "Falha ao baixar wordlist de subdomínios" >> "$RESULTS_DIR/error.log"
             return 1
         }
     }
@@ -68,25 +69,31 @@ substituir_variaveis() {
         wordlist_web="/tmp/common.txt"
         curl -s https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt -o "$wordlist_web" || {
             print_status "error" "Falha ao baixar wordlist web"
+            echo "Falha ao baixar wordlist web" >> "$RESULTS_DIR/error.log"
             return 1
         }
     }
+    [ ! -f "$WORDLISTS_EXT" ] && { 
+        print_status "error" "Wordlist de extensões não encontrada: $WORDLISTS_EXT"
+        echo "Wordlist de extensões não encontrada: $WORDLISTS_EXT" >> "$RESULTS_DIR/error.log"
+        return 1
+    }
     local protocol=$(determinar_protocolo)
     local url="$protocol://$ip"
-    # Sanitizar variáveis usando printf para escapar caracteres especiais
     local safe_target=$(printf '%q' "$TARGET")
     local safe_ip=$(printf '%q' "$ip")
     local safe_url=$(printf '%q' "$url")
     local safe_wordlist_subdomains=$(printf '%q' "$wordlist_subdomains")
     local safe_wordlist_web=$(printf '%q' "$wordlist_web")
+    local safe_wordlist_ext=$(printf '%q' "$WORDLISTS_EXT")
     local safe_url_dominio=$(printf '%q' "${URL_DOMINIO:-$TARGET}")
-    # Usar delimitador alternativo (#) para evitar conflitos com / ou :
     echo "$cmd" | sed \
         -e "s#{DOMINIO}#$safe_url_dominio#g" \
         -e "s#{TARGET_IP}#$safe_ip#g" \
         -e "s#{URL}#$safe_url#g" \
         -e "s#{WORDLIST_SUBDOMAINS}#$safe_wordlist_subdomains#g" \
-        -e "s#{WORDLIST_WEB}#$safe_wordlist_web#g"
+        -e "s#{WORDLIST_WEB}#$safe_wordlist_web#g" \
+        -e "s#{WORDLISTS_EXT}#$safe_wordlist_ext#g"
 }
 
 executar_comando() {
@@ -112,6 +119,7 @@ analyze_nmap_results() {
     local xml_file="$1" ip_version="$2"
     if [ ! -f "$xml_file" ]; then
         print_status "error" "Arquivo $xml_file não encontrado"
+        echo "Arquivo $xml_file não encontrado" >> "$RESULTS_DIR/error.log"
         return 1
     fi
     local -n port_status="PORT_STATUS_$ip_version"
@@ -192,7 +200,10 @@ test_http() {
         CHECKLIST+=("HTTP ($protocol): ✗ Servidor inativo ou erro (${elapsed}s)")
     fi
     # Limitar o conteúdo do arquivo apenas aos headers
-    sed -i '/^\r$/q' "$output_file"  # Remove o corpo da resposta se houver
+    sed -i '/^\r$/q' "$output_file" 2>>"$RESULTS_DIR/error.log" || {
+        print_status "error" "Falha ao limitar conteúdo de $output_file"
+        echo "Falha ao limitar conteúdo de $output_file" >> "$RESULTS_DIR/error.log"
+    }
 }
 
 test_ffuf_subdomains() {
@@ -200,7 +211,11 @@ test_ffuf_subdomains() {
         for cmd in "${FFUF_COMMANDS[@]}"; do
             local start_time=$(date +%s)
             local start_time_display=$(date +"%H:%M:%S")
-            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4") || return 1
+            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4") || {
+                print_status "error" "Falha ao substituir variáveis no comando FFUF Subdomínios"
+                echo "Falha ao substituir variáveis no comando FFUF Subdomínios: $cmd" >> "$RESULTS_DIR/error.log"
+                return 1
+            }
             executar_comando "$cmd_substituido" "FFUF Subdomínios (iniciado às $start_time_display)" "$RESULTS_DIR/ffuf_subdomains.csv" "Subdomínios encontrados" "Nenhum subdomínio encontrado"
         done
     else
@@ -228,7 +243,11 @@ test_ffuf_extensions() {
         for cmd in "${FFUF_EXT_COMMANDS[@]}"; do
             local start_time=$(date +%s)
             local start_time_display=$(date +"%H:%M:%S")
-            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4") || return 1
+            local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4") || {
+                print_status "error" "Falha ao substituir variáveis no comando FFUF Extensões"
+                echo "Falha ao substituir variáveis no comando FFUF Extensões: $cmd" >> "$RESULTS_DIR/error.log"
+                return 1
+            }
             executar_comando "$cmd_substituido" "FFUF Extensões (iniciado às $start_time_display)" "$RESULTS_DIR/ffuf_extensions.csv" "Extensões encontradas" "Nenhuma extensão encontrada"
         done
     else
@@ -249,13 +268,18 @@ Ativo_basico() {
 
 Ativo_complexo() {
     print_status "info" "Executando testes ATIVOS COMPLEXOS em $TARGET"
-    mkdir -p "$RESULTS_DIR"
+    mkdir -p "$RESULTS_DIR" 2>>"$RESULTS_DIR/error.log" || {
+        print_status "error" "Falha ao criar diretório $RESULTS_DIR"
+        echo "Falha ao criar diretório $RESULTS_DIR" >> "$RESULTS_DIR/error.log"
+        return 1
+    }
     if [ -n "$TARGET_IPv4" ]; then
         for cmd in "${NMAP_COMMANDS_IPV4[@]}"; do
             local start_time=$(date +%s)
             local start_time_display=$(date +"%H:%M:%S")
             local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv4") || {
                 print_status "error" "Falha ao substituir variáveis no comando Nmap IPv4: $cmd"
+                echo "Falha ao substituir variáveis no comando Nmap IPv4: $cmd" >> "$RESULTS_DIR/error.log"
                 CHECKLIST+=("Nmap IPv4: ✗ Falha na substituição de variáveis")
                 continue
             }
@@ -271,6 +295,7 @@ Ativo_complexo() {
             local start_time_display=$(date +"%H:%M:%S")
             local cmd_substituido=$(substituir_variaveis "$cmd" "$TARGET_IPv6") || {
                 print_status "error" "Falha ao substituir variáveis no comando Nmap IPv6: $cmd"
+                echo "Falha ao substituir variáveis no comando Nmap IPv6: $cmd" >> "$RESULTS_DIR/error.log"
                 CHECKLIST+=("Nmap IPv6: ✗ Falha na substituição de variáveis")
                 continue
             }
@@ -280,7 +305,12 @@ Ativo_complexo() {
         done
         consolidar_portas "IPv6"
     fi
-    [ "$TYPE_TARGET" = "DOMAIN" ] && test_ffuf_subdomains
-    [ "$TYPE_TARGET" = "DOMAIN" ] && test_ffuf_directories
-    [ "$TYPE_TARGET" = "DOMAIN" ] && test_ffuf_extensions
+    if [ "$TYPE_TARGET" = "DOMAIN" ]; then
+        test_ffuf_subdomains
+        test_ffuf_directories
+        test_ffuf_extensions
+    else
+        print_status "info" "Testes FFUF (subdomínios, diretórios, extensões) ignorados: requer domínio"
+        echo "Testes FFUF ignorados: alvo não é um domínio ($TARGET)" >> "$RESULTS_DIR/error.log"
+    fi
 }

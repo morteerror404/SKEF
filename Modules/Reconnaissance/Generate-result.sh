@@ -26,11 +26,25 @@ declare -A TEST_FILES=(
 
 declare -a BASIC_TESTS=("Ping" "DNS" "Porta" "HTTP" "Traceroute" "HTTP Headers")
 declare -a COMPLEX_TESTS=("Nmap IPv4" "Nmap IPv6" "FFUF Subdomínios" "FFUF Web" "FFUF Extensões")
+MAX_BACKUPS=5  # Limite de relatórios antigos mantidos
 
 #------------#------------# FUNÇÕES AUXILIARES #------------#------------#
 sanitize_string() {
     local input="$1"
     echo -n "$input" | tr -d '\n\r\t\0' | sed 's/[^[:print:]]//g' | sed 's/"/\\"/g' | sed "s/'/\\'/g" | sed 's/\\/\\\\/g' | sed 's/#/\\#/g' | sed 's/*/\\*/g' | sed 's/_/\\_/g'
+}
+
+rotate_old_reports() {
+    local report_file="$RESULTS_DIR/relatorio.md"
+    print_status "info" "Rotacionando relatórios antigos..."
+    local i=$MAX_BACKUPS
+    while [ $i -gt 0 ]; do
+        local prev=$((i-1))
+        [ -f "$RESULTS_DIR/relatorio-$prev-old.md" ] && mv "$RESULTS_DIR/relatorio-$prev-old.md" "$RESULTS_DIR/relatorio-$i-old.md" 2>>"$RESULTS_DIR/error.log"
+        ((i--))
+    done
+    [ -f "$report_file" ] && mv "$report_file" "$RESULTS_DIR/relatorio-old.md" 2>>"$RESULTS_DIR/error.log"
+    print_status "success" "Relatórios antigos rotacionados."
 }
 
 get_metadata() {
@@ -39,7 +53,7 @@ get_metadata() {
     [ -z "$TARGET" ] && { print_status "error" "TARGET não definido"; echo "TARGET não definido" >>"$RESULTS_DIR/error.log"; return 1; }
     [ -z "$TYPE_TARGET" ] && { print_status "error" "TYPE_TARGET não definido"; echo "TYPE_TARGET não definido" >>"$RESULTS_DIR/error.log"; return 1; }
     [ -z "$START_TIME" ] && START_TIME=$(date +%s)
-    metadata+="- **Script**: AutoRecon Script (Versão 1.2.4)\n"
+    metadata+="- **Script**: AutoRecon Script (Versão 1.3.0)\n"
     metadata+="- **Sistema Operacional**: $(sanitize_string "$(uname -a)")\n"
     metadata+="- **Hora de Início**: $(date -d @$START_TIME '+%Y-%m-%d %H:%M:%S')\n"
     metadata+="- **Usuário**: $(sanitize_string "$(whoami)")\n"
@@ -47,7 +61,12 @@ get_metadata() {
     metadata+="- **IPv4 Resolvido**: $(sanitize_string "${TARGET_IPv4:-Não resolvido}")\n"
     metadata+="- **IPv6 Resolvido**: $(sanitize_string "${TARGET_IPv6:-Não resolvido}")\n"
     metadata+="- **Tipo de Alvo**: $(sanitize_string "$TYPE_TARGET")\n"
-    metadata+="- **Protocolo**: $(sanitize_string "$(determinar_protocolo)")\n"
+    metadata+="- **Protocolo**: $(sanitize_string "${URL_PROTOCOLO:-$(determinar_protocolo)}")\n"
+    [ -n "$URL_SUB_DOMINIO" ] && metadata+="- **Subdomínio**: $(sanitize_string "$URL_SUB_DOMINIO")\n"
+    [ -n "$URL_DOMINIO" ] && metadata+="- **Domínio Principal**: $(sanitize_string "$URL_DOMINIO")\n"
+    [ -n "$URL_PATH" ] && metadata+="- **Path**: $(sanitize_string "$URL_PATH")\n"
+    [ -n "$URL_PORT" ] && metadata+="- **Porta**: $(sanitize_string "$URL_PORT")\n"
+    metadata+="- **URL Completa**: $(sanitize_string "${URL_PROTOCOLO}://${URL_SUB_DOMINIO}${URL_DOMINIO}${URL_PORT}${URL_PATH}")\n"
     metadata+="- **Hora de Resolução**: $(date +'%Y-%m-%d %H:%M:%S')\n\n"
     echo -e "$metadata"
 }
@@ -84,6 +103,17 @@ get_dependencies() {
     done
     deps+="\n"
     echo -e "$deps"
+}
+
+get_error_log() {
+    local errors="## Erros Encontrados\n\n"
+    if [ -f "$RESULTS_DIR/error.log" ]; then
+        errors+=$(cat "$RESULTS_DIR/error.log" | sed 's/^/    /')
+        errors+="\n"
+    else
+        errors+="Nenhum erro registrado.\n\n"
+    fi
+    echo -e "$errors"
 }
 
 clean_intermediate_files() {
@@ -493,6 +523,10 @@ generate_statistics() {
     stats+="- **Tempo Total de Execução**: $(( $(date +%s) - START_TIME )) segundos\n\n"
     echo -e "$stats" >> "$report_file" 2>>"$RESULTS_DIR/error.log" || {
         print_status "error" "Falha ao salvar estatísticas no relatório"
+        return 1
+    }
+    echo -e "$(get_error_log)" >> "$report_file" 2>>"$RESULTS_DIR/error.log" || {
+        print_status "error" "Falha ao salvar log de erros no relatório"
         return 1
     }
 }

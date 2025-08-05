@@ -89,6 +89,11 @@ definir_alvo() {
     # Extrair protocolo se existir
     if [[ "$TARGET" =~ ^(https?://)([^/:]+) ]]; then
         URL_PROTOCOLO="${BASH_REMATCH[1]%%://*}"  # Extrai apenas 'http' ou 'https'
+        if [[ ! "$URL_PROTOCOLO" =~ ^(http|https)$ ]]; then
+            print_status "error" "Protocolo inválido. Use http ou https." >> "$RESULTS_DIR/error.log"
+            echo "Protocolo inválido: $URL_PROTOCOLO" >> "$RESULTS_DIR/error.log"
+            return 1
+        fi
         TARGET="${TARGET#${BASH_REMATCH[1]}}"
     fi
     
@@ -116,48 +121,31 @@ definir_alvo() {
     TYPE_TARGET=$(verificar_tipo_alvo "$TARGET")
     if [ "$TYPE_TARGET" = "INVÁLIDO" ]; then
         print_status "error" "Entrada inválida. Digite um IP, domínio ou URL válido."
-        CHECKLIST+=("Alvo definido: ✗ Entrada inválida")
+        echo "Entrada inválida: $TARGET" >> "$RESULTS_DIR/error.log"
         return 1
-    fi
-    
-    # Para URLs, formatar saídas para ffuf
-    if [ -n "$URL_PROTOCOLO" ]; then
-        CHECKLIST+=("URL completa: ✓ ${URL_PROTOCOLO}://${TARGET}${URL_PORT}${URL_PATH}")
-        [ -n "$URL_SUB_DOMINIO" ] && CHECKLIST+=("Subdomínio: ✓ $URL_SUB_DOMINIO")
-        CHECKLIST+=("Domínio principal: ✓ $URL_DOMINIO")
-        CHECKLIST+=("Protocolo: ✓ $URL_PROTOCOLO")
-        [ -n "$URL_PORT" ] && CHECKLIST+=("Porta: ✓ $URL_PORT")
-        [ -n "$URL_PATH" ] && CHECKLIST+=("Path: ✓ $URL_PATH")
-        
-        # Formatar para ffuf
-        FFUF_DOMAIN="${URL_SUB_DOMINIO}.${URL_DOMINIO}"
-        FFUF_URL="${URL_PROTOCOLO}://${FFUF_DOMAIN}${URL_PORT}"
     fi
     
     # Resolução DNS para domínios
     if [ "$TYPE_TARGET" = "DOMAIN" ]; then
         if ! dig +short A "$TARGET" &>/dev/null; then
             print_status "error" "Falha ao resolver DNS. Verifique a conectividade ou o domínio."
-            CHECKLIST+=("Resolução de IP: ✗ Falha na resolução DNS para $TARGET")
+            echo "Falha na resolução DNS para $TARGET" >> "$RESULTS_DIR/error.log"
             return 1
         fi
         TARGET_IPv4=$(dig +short A "$TARGET" | grep -oP '^\d+\.\d+\.\d+\.\d+$' | head -1)
         TARGET_IPv6=$(dig +short AAAA "$TARGET" | grep -oP '^[0-9a-fA-F:]+$' | head -1)
         if [ -z "$TARGET_IPv4" ] && [ -z "$TARGET_IPv6" ]; then
-            CHECKLIST+=("Resolução de IP: ✗ Não foi possível resolver IP para $TARGET")
+            print_status "error" "Não foi possível resolver IP para $TARGET"
+            echo "Não foi possível resolver IP para $TARGET" >> "$RESULTS_DIR/error.log"
             return 1
         fi
-        [ -n "$TARGET_IPv4" ] && CHECKLIST+=("Resolução IPv4: ✓ $TARGET_IPv4")
-        [ -n "$TARGET_IPv6" ] && CHECKLIST+=("Resolução IPv6: ✓ $TARGET_IPv6")
     else
         TARGET_IPv4="$TARGET"
-        CHECKLIST+=("Alvo definido: ✓ $TARGET (IPv4)")
     fi
     
-    # Adicionar variáveis globais para uso posterior
-    if [ -n "$URL_PROTOCOLO" ]; then
-        export URL_ORIGINAL URL_PROTOCOLO URL_SUB_DOMINIO URL_DOMINIO URL_PATH URL_PORT FFUF_DOMAIN FFUF_URL
-    fi
+    # Exportar variáveis globais
+    export URL_ORIGINAL URL_PROTOCOLO URL_SUB_DOMINIO URL_DOMINIO URL_PATH URL_PORT TARGET_IPv4 TARGET_IPv6 TYPE_TARGET FFUF_DOMAIN="${URL_SUB_DOMINIO}.${URL_DOMINIO}" FFUF_URL="${URL_PROTOCOLO}://${URL_SUB_DOMINIO}.${URL_DOMINIO}${URL_PORT}"
+    print_status "success" "Alvo definido: $TARGET ($TYPE_TARGET)"
 }
 
 #------------#------------# FUNÇÕES DE TESTE #------------#------------#
@@ -252,6 +240,7 @@ menu_personalizado() {
                 if [ -f "./Generate-result.sh" ]; then
                     source ./Generate-result.sh
                     if declare -f save_report >/dev/null; then
+                        rotate_old_reports
                         save_report
                     else
                         print_status "error" "Função save_report não encontrada em Generate-result.sh."
@@ -314,6 +303,7 @@ menu_inicial() {
                 if [ -f "./Generate-result.sh" ]; then
                     source ./Generate-result.sh
                     if declare -f save_report >/dev/null; then
+                        rotate_old_reports
                         save_report
                     else
                         print_status "error" "Função save_report não encontrada em Generate-result.sh."
